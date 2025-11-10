@@ -231,18 +231,19 @@ class MouseJiggler:
         self.base_interval = base_interval
         self.jitter = jitter
 
-        self._last_activity_time = time.monotonic()
         self._stop = False
         self._task: Optional[asyncio.Task] = None
-        self._next_jiggle_interval = self._get_next_interval()  # Calculate initial interval
+        # Set the absolute time when next jiggle should occur
+        self._next_jiggle_time = time.monotonic() + self._get_next_interval()
 
     async def __aenter__(self):
         """
         Async context manager entry. Starts the jiggler task.
         """
         self._stop = False
+        interval = self._next_jiggle_time - time.monotonic()
         self._task = asyncio.create_task(self._jiggle_loop())
-        _logger.debug(f"MouseJiggler: Started jiggle loop (first jiggle in {self._next_jiggle_interval:.1f}s).")
+        _logger.debug(f"MouseJiggler: Started jiggle loop (first jiggle in {interval:.1f}s).")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -258,11 +259,13 @@ class MouseJiggler:
 
     def reset_timer(self) -> None:
         """
-        Reset the activity timer. Should be called whenever input is relayed to USB.
-        Also recalculates the next jiggle interval.
+        Reset the jiggle timer. Should be called whenever input is relayed to USB.
+        Sets a new random target time approximately 2 minutes from now.
         """
-        self._last_activity_time = time.monotonic()
-        self._next_jiggle_interval = self._get_next_interval()
+        current_time = time.monotonic()
+        interval = self._get_next_interval()
+        self._next_jiggle_time = current_time + interval
+        _logger.debug(f"MouseJiggler: Timer reset, next jiggle in {interval:.1f}s")
 
     def _get_next_interval(self) -> float:
         """
@@ -277,26 +280,33 @@ class MouseJiggler:
         """
         Main loop that periodically checks if it should jiggle the mouse.
         Works independently of relay state to keep OTG device awake.
+
+        Logic:
+        1. Wait until the target jiggle time is reached
+        2. Check if jiggling is enabled and USB is connected
+        3. If yes, perform jiggle; if no, skip jiggle
+        4. Set a new random target time ~2 minutes in the future
+        5. Repeat
         """
         while not self._stop:
             try:
-                # Wait for the next check interval (use a shorter sleep for responsiveness)
+                # Check every second if it's time to jiggle
                 await asyncio.sleep(1.0)
 
-                # Only jiggle if jiggler is enabled AND USB is connected
-                if not self.jiggler_enabled.is_set():
-                    continue
+                current_time = time.monotonic()
 
-                if not self.usb_connected.is_set():
-                    continue
+                # Check if it's time to jiggle
+                if current_time >= self._next_jiggle_time:
+                    # Time to jiggle! But only if enabled and USB is connected
+                    if self.jiggler_enabled.is_set() and self.usb_connected.is_set():
+                        self._perform_jiggle()
+                    else:
+                        _logger.debug("MouseJiggler: Jiggle timer expired but jiggling is disabled or USB not connected")
 
-                time_since_activity = time.monotonic() - self._last_activity_time
-
-                if time_since_activity >= self._next_jiggle_interval:
-                    self._perform_jiggle()
-                    # Reset timer and calculate next interval after jiggling
-                    self.reset_timer()
-                    _logger.debug(f"MouseJiggler: Next jiggle in {self._next_jiggle_interval:.1f}s")
+                    # Set next jiggle time (regardless of whether we jiggled or not)
+                    interval = self._get_next_interval()
+                    self._next_jiggle_time = current_time + interval
+                    _logger.debug(f"MouseJiggler: Next jiggle scheduled in {interval:.1f}s")
 
             except asyncio.CancelledError:
                 break
