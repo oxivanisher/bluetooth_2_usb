@@ -1,7 +1,9 @@
 import asyncio
 from asyncio import Task, TaskGroup
 from pathlib import Path
+import random
 import re
+import time
 from typing import Optional, Union
 
 from adafruit_hid.consumer_control import ConsumerControl
@@ -152,6 +154,175 @@ class ShortcutToggler:
             _logger.info("ShortcutToggler: Relaying is now ON.")
 
 
+class JigglerToggler:
+    """
+    Tracks a user-defined shortcut and toggles mouse jiggler on/off when the shortcut is pressed.
+    """
+
+    def __init__(
+        self,
+        shortcut_keys: set[str],
+        jiggler_enabled: asyncio.Event,
+    ) -> None:
+        """
+        :param shortcut_keys: A set of evdev-style key names to detect
+        :param jiggler_enabled: An asyncio.Event controlling whether jiggler is enabled
+        """
+        self.shortcut_keys = shortcut_keys
+        self.jiggler_enabled = jiggler_enabled
+
+        self.currently_pressed: set[str] = set()
+
+    def handle_key_event(self, event: KeyEvent) -> None:
+        """
+        Process a key press or release to detect the toggle shortcut.
+
+        :param event: The incoming KeyEvent from evdev
+        :type event: KeyEvent
+        """
+        key_name = find_key_name(event)
+        if key_name is None:
+            return
+
+        if event.keystate == KeyEvent.key_down:
+            self.currently_pressed.add(key_name)
+        elif event.keystate == KeyEvent.key_up:
+            self.currently_pressed.discard(key_name)
+
+        if self.shortcut_keys and self.shortcut_keys.issubset(self.currently_pressed):
+            self.toggle_jiggler()
+
+    def toggle_jiggler(self) -> None:
+        """
+        Toggle the jiggler enabled state: if it was on, turn it off, otherwise turn it on.
+        """
+        if self.jiggler_enabled.is_set():
+            self.jiggler_enabled.clear()
+            _logger.info("JigglerToggler: Mouse jiggler is now OFF.")
+        else:
+            self.jiggler_enabled.set()
+            _logger.info("JigglerToggler: Mouse jiggler is now ON.")
+
+
+class MouseJiggler:
+    """
+    Periodically moves the mouse by 1 pixel to prevent screen timeout.
+    Only jiggles if no input activity has occurred for approximately 2 minutes.
+    """
+
+    def __init__(
+        self,
+        gadget_manager: GadgetManager,
+        jiggler_enabled: asyncio.Event,
+        base_interval: float = 120.0,
+        jitter: float = 15.0,
+    ) -> None:
+        """
+        :param gadget_manager: Provides access to the USB HID mouse gadget
+        :param jiggler_enabled: Event indicating if jiggler is enabled
+        :param base_interval: Base interval in seconds between jiggles (default: 120s / 2 minutes)
+        :param jitter: Random jitter in seconds to add/subtract from base_interval (default: ±15s)
+        """
+        self.gadget_manager = gadget_manager
+        self.jiggler_enabled = jiggler_enabled
+        self.base_interval = base_interval
+        self.jitter = jitter
+
+        self._last_activity_time = time.monotonic()
+        self._stop = False
+        self._task: Optional[asyncio.Task] = None
+
+    async def __aenter__(self):
+        """
+        Async context manager entry. Starts the jiggler task.
+        """
+        self._stop = False
+        self._task = asyncio.create_task(self._jiggle_loop())
+        _logger.debug("MouseJiggler: Started jiggle loop.")
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """
+        Async context manager exit. Stops the jiggler task.
+        """
+        if self._task:
+            self._stop = True
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+        _logger.debug("MouseJiggler: Stopped jiggle loop.")
+        return False
+
+    def reset_timer(self) -> None:
+        """
+        Reset the activity timer. Should be called whenever input is relayed to USB.
+        """
+        self._last_activity_time = time.monotonic()
+
+    def _get_next_interval(self) -> float:
+        """
+        Calculate the next interval with random jitter.
+
+        :return: Interval in seconds
+        :rtype: float
+        """
+        return self.base_interval + random.uniform(-self.jitter, self.jitter)
+
+    async def _jiggle_loop(self) -> None:
+        """
+        Main loop that periodically checks if it should jiggle the mouse.
+        Works independently of relay state to keep OTG device awake.
+        """
+        while not self._stop:
+            try:
+                # Wait for the next check interval (use a shorter sleep for responsiveness)
+                await asyncio.sleep(1.0)
+
+                # Only jiggle if jiggler is enabled
+                if not self.jiggler_enabled.is_set():
+                    continue
+
+                time_since_activity = time.monotonic() - self._last_activity_time
+                next_interval = self._get_next_interval()
+
+                if time_since_activity >= next_interval:
+                    self._perform_jiggle()
+                    # Reset timer after jiggling
+                    self.reset_timer()
+
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                _logger.exception("MouseJiggler: Error in jiggle loop")
+
+    def _perform_jiggle(self) -> None:
+        """
+        Move the mouse by 1 pixel in a random direction (x and/or y, +/-).
+        """
+        mouse = self.gadget_manager.get_mouse()
+        if mouse is None:
+            _logger.warning("MouseJiggler: Mouse gadget not available")
+            return
+
+        try:
+            # Randomly choose direction for each axis
+            # 50% chance to move on X axis, 50% on Y axis, can be both
+            x_move = random.choice([-1, 0, 1])
+            y_move = random.choice([-1, 0, 1])
+
+            # Ensure we move at least in one direction
+            if x_move == 0 and y_move == 0:
+                # If both are 0, pick a random axis and direction
+                if random.choice([True, False]):
+                    x_move = random.choice([-1, 1])
+                else:
+                    y_move = random.choice([-1, 1])
+
+            mouse.move(x=x_move, y=y_move)
+            _logger.debug(f"MouseJiggler: Jiggled mouse (x={x_move:+d}, y={y_move:+d})")
+        except Exception as ex:
+            _logger.warning(f"MouseJiggler: Failed to jiggle mouse: {ex}")
+
+
 class RelayController:
     """
     Controls the creation and lifecycle of per-device relays.
@@ -167,6 +338,8 @@ class RelayController:
         grab_devices: bool = False,
         relaying_active: Optional[asyncio.Event] = None,
         shortcut_toggler: Optional["ShortcutToggler"] = None,
+        jiggler_toggler: Optional["JigglerToggler"] = None,
+        mouse_jiggler: Optional["MouseJiggler"] = None,
     ) -> None:
         """
         :param gadget_manager: Provides the USB HID gadget devices
@@ -176,6 +349,8 @@ class RelayController:
         :param grab_devices: If True, the relay tries to grab exclusive access to each device
         :param relaying_active: asyncio.Event to indicate if relaying is active
         :param shortcut_toggler: ShortcutToggler to allow toggling relaying globally
+        :param jiggler_toggler: JigglerToggler to allow toggling jiggler via shortcut
+        :param mouse_jiggler: MouseJiggler to prevent screen timeout
         """
         self._gadget_manager = gadget_manager
         self._device_ids = [DeviceIdentifier(id) for id in (device_identifiers or [])]
@@ -184,6 +359,8 @@ class RelayController:
         self._grab_devices = grab_devices
         self._relaying_active = relaying_active
         self._shortcut_toggler = shortcut_toggler
+        self._jiggler_toggler = jiggler_toggler
+        self._mouse_jiggler = mouse_jiggler
 
         self._active_tasks: dict[str, Task] = {}
         self._task_group: Optional[TaskGroup] = None
@@ -273,6 +450,8 @@ class RelayController:
                 grab_device=self._grab_devices,
                 relaying_active=self._relaying_active,
                 shortcut_toggler=self._shortcut_toggler,
+                jiggler_toggler=self._jiggler_toggler,
+                mouse_jiggler=self._mouse_jiggler,
             ) as relay:
                 _logger.info(f"Activated {relay}")
                 await relay.async_relay_events_loop()
@@ -317,6 +496,8 @@ class DeviceRelay:
         grab_device: bool = False,
         relaying_active: Optional[asyncio.Event] = None,
         shortcut_toggler: Optional["ShortcutToggler"] = None,
+        jiggler_toggler: Optional["JigglerToggler"] = None,
+        mouse_jiggler: Optional["MouseJiggler"] = None,
     ) -> None:
         """
         :param input_device: The evdev input device
@@ -324,12 +505,16 @@ class DeviceRelay:
         :param grab_device: Whether to grab the device for exclusive access
         :param relaying_active: asyncio.Event that indicates relaying is on/off
         :param shortcut_toggler: Optional handler for toggling relay via a shortcut
+        :param jiggler_toggler: Optional handler for toggling jiggler via a shortcut
+        :param mouse_jiggler: Optional MouseJiggler to reset activity timer on input
         """
         self._input_device = input_device
         self._gadget_manager = gadget_manager
         self._grab_device = grab_device
         self._relaying_active = relaying_active
         self._shortcut_toggler = shortcut_toggler
+        self._jiggler_toggler = jiggler_toggler
+        self._mouse_jiggler = mouse_jiggler
 
         self._currently_grabbed = False
 
@@ -389,8 +574,12 @@ class DeviceRelay:
                     f"Received {event} from {self._input_device.name} ({self._input_device.path})"
                 )
 
-            if self._shortcut_toggler and isinstance(event, KeyEvent):
-                self._shortcut_toggler.handle_key_event(event)
+            # Handle shortcuts before checking relay state (shortcuts work even when relaying is paused)
+            if isinstance(event, KeyEvent):
+                if self._shortcut_toggler:
+                    self._shortcut_toggler.handle_key_event(event)
+                if self._jiggler_toggler:
+                    self._jiggler_toggler.handle_key_event(event)
 
             active = self._relaying_active and self._relaying_active.is_set()
 
@@ -428,6 +617,9 @@ class DeviceRelay:
         for attempt in range(1, max_tries + 1):
             try:
                 relay_event(event, self._gadget_manager)
+                # Reset mouse jiggler timer on successful relay
+                if self._mouse_jiggler:
+                    self._mouse_jiggler.reset_timer()
                 return
             except BlockingIOError:
                 if attempt < max_tries:

@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+import contextlib
 from logging import DEBUG
 from pathlib import Path
 import signal
@@ -11,6 +12,8 @@ from src.bluetooth_2_usb.args import parse_args
 from src.bluetooth_2_usb.logging import add_file_handler, get_logger
 from src.bluetooth_2_usb.relay import (
     GadgetManager,
+    JigglerToggler,
+    MouseJiggler,
     RelayController,
     ShortcutToggler,
     UdcStateMonitor,
@@ -94,6 +97,28 @@ async def main() -> None:
                 gadget_manager=gadget_manager,
             )
 
+    jiggler_enabled = asyncio.Event()
+    jiggler_toggler = None
+    mouse_jiggler = None
+    if args.mouse_jiggler:
+        logger.debug("Configuring mouse jiggler (base interval: 120s, jitter: ±15s)")
+        # Start with jiggler enabled
+        jiggler_enabled.set()
+
+        mouse_jiggler = MouseJiggler(
+            gadget_manager=gadget_manager,
+            jiggler_enabled=jiggler_enabled,
+        )
+
+        # Set up jiggler toggle shortcut
+        shortcut_keys = validate_shortcut(args.jiggler_shortcut)
+        if shortcut_keys:
+            logger.debug(f"Configuring jiggler toggle shortcut: {shortcut_keys}")
+            jiggler_toggler = JigglerToggler(
+                shortcut_keys=shortcut_keys,
+                jiggler_enabled=jiggler_enabled,
+            )
+
     relay_controller = RelayController(
         gadget_manager=gadget_manager,
         device_identifiers=args.device_ids,
@@ -101,6 +126,8 @@ async def main() -> None:
         grab_devices=args.grab_devices,
         relaying_active=relaying_active,
         shortcut_toggler=shortcut_toggler,
+        jiggler_toggler=jiggler_toggler,
+        mouse_jiggler=mouse_jiggler,
     )
 
     udc_path = get_udc_path()
@@ -109,19 +136,28 @@ async def main() -> None:
         return
     logger.debug(f"Detected UDC state file: {udc_path}")
 
-    async with (
+    # Build the list of context managers dynamically
+    context_managers = [
         UdevEventMonitor(relay_controller),
         UdcStateMonitor(
             relaying_active=relaying_active,
             udc_path=udc_path,
         ),
-    ):
-        relay_task = asyncio.create_task(relay_controller.async_relay_devices())
-        await shutdown_event.wait()
+    ]
+    if mouse_jiggler:
+        context_managers.append(mouse_jiggler)
 
-        logger.debug("Shutdown event triggered. Cancelling relay task...")
-        relay_task.cancel()
-        await asyncio.gather(relay_task, return_exceptions=True)
+    async with asyncio.TaskGroup() as tg:
+        # Enter all context managers
+        async with contextlib.AsyncExitStack() as stack:
+            for cm in context_managers:
+                await stack.enter_async_context(cm)
+
+            relay_task = tg.create_task(relay_controller.async_relay_devices())
+            await shutdown_event.wait()
+
+            logger.debug("Shutdown event triggered. Cancelling relay task...")
+            relay_task.cancel()
 
 
 async def async_list_devices():

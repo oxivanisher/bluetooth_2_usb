@@ -16,6 +16,12 @@ from .logging import add_file_handler, get_logger
 from .relay import (
     DeviceIdentifier,
     DeviceRelay,
+    GadgetManager,
+    JigglerToggler,
+    MouseJiggler,
     RelayController,
+    ShortcutToggler,
+    UdcStateMonitor,
+    UdevEventMonitor,
     async_list_input_devices,
 )

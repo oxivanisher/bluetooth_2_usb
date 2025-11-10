@@ -41,6 +41,26 @@ class CustomArgumentParser(argparse.ArgumentParser):
             help="Grab the input devices, i.e., suppress any events on your relay device.\nDevices are not grabbed by default.",
         )
         self.add_argument(
+            "--mouse_jiggler",
+            "-j",
+            action="store_true",
+            default=False,
+            help="Enable mouse jiggler to prevent screen timeout. Moves mouse 1 pixel every ~2 minutes if no input activity detected.\nDefault: disabled",
+        )
+        self.add_argument(
+            "--jiggler_shortcut",
+            "-js",
+            type=lambda input: [
+                key.strip().upper() for key in input.split("+") if key.strip()
+            ],
+            default=["CTRL", "SHIFT", "F11"],
+            help=(
+                "A plus-separated list of key names to press simultaneously in order to "
+                "toggle mouse jiggler on/off. Only works if --mouse_jiggler is enabled. Example: CTRL+SHIFT+F11\n"
+                "Default: CTRL+SHIFT+F11"
+            ),
+        )
+        self.add_argument(
             "--interrupt_shortcut",
             "-s",
             type=lambda input: [
@@ -116,6 +136,8 @@ class Arguments:
         "_device_ids",
         "_auto_discover",
         "_grab_devices",
+        "_mouse_jiggler",
+        "_jiggler_shortcut",
         "_interrupt_shortcut",
         "_list_devices",
         "_log_to_file",
@@ -129,6 +151,8 @@ class Arguments:
         device_ids: Optional[list[str]],
         auto_discover: bool,
         grab_devices: bool,
+        mouse_jiggler: bool,
+        jiggler_shortcut: Optional[list[str]],
         interrupt_shortcut: Optional[list[str]],
         list_devices: bool,
         log_to_file: bool,
@@ -139,6 +163,8 @@ class Arguments:
         self._device_ids = device_ids
         self._auto_discover = auto_discover
         self._grab_devices = grab_devices
+        self._mouse_jiggler = mouse_jiggler
+        self._jiggler_shortcut = jiggler_shortcut
         self._interrupt_shortcut = interrupt_shortcut
         self._list_devices = list_devices
         self._log_to_file = log_to_file
@@ -157,6 +183,14 @@ class Arguments:
     @property
     def grab_devices(self) -> bool:
         return self._grab_devices
+
+    @property
+    def mouse_jiggler(self) -> bool:
+        return self._mouse_jiggler
+
+    @property
+    def jiggler_shortcut(self) -> Optional[list[str]]:
+        return self._jiggler_shortcut
 
     @property
     def interrupt_shortcut(self) -> Optional[list[str]]:
@@ -201,6 +235,8 @@ def parse_args() -> Arguments:
         device_ids=args.device_ids,
         auto_discover=args.auto_discover,
         grab_devices=args.grab_devices,
+        mouse_jiggler=args.mouse_jiggler,
+        jiggler_shortcut=args.jiggler_shortcut,
         interrupt_shortcut=args.interrupt_shortcut,
         list_devices=args.list_devices,
         log_to_file=args.log_to_file,
