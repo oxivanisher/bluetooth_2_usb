@@ -195,7 +195,7 @@ options:
                         Default: disabled
   --grab_devices, -g    Grab the input devices, i.e., suppress any events on your relay device.
                         Devices are not grabbed by default.
-  --mouse_jiggler, -j   Enable mouse jiggler to prevent screen timeout. Moves mouse 1 pixel every ~2 minutes if no input activity detected.
+  --mouse_jiggler, -j   Enable mouse jiggler to prevent screen timeout. Moves mouse 2 pixels every ~2 minutes if no input activity detected.
                         Default: disabled
   --jiggler_shortcut JIGGLER_SHORTCUT, -js JIGGLER_SHORTCUT
                         A plus-separated list of key names to press simultaneously in order to toggle mouse jiggler on/off. Only works if --mouse_jiggler is enabled. Example: CTRL+SHIFT+F11
@@ -220,7 +220,7 @@ A key challenge when using Bluetooth 2 USB on a Raspberry Pi as systemd service 
 
 ### 4.4. Mouse Jiggler Feature
 
-The mouse jiggler feature prevents screen timeout and screensavers on the target device by automatically moving the mouse cursor by 1 pixel in a random direction approximately every 2 minutes (with ±15 seconds randomness) when no input activity is detected. This feature is particularly useful for:
+The mouse jiggler feature prevents screen timeout and screensavers on the target device by automatically moving the mouse cursor by 2 pixels in a random direction approximately every 2 minutes (with ±15 seconds randomness) when no input activity is detected. This feature is particularly useful for:
 
 - Keeping remote desktop connections alive
 - Preventing screensavers or screen lock on the target device
@@ -229,7 +229,7 @@ The mouse jiggler feature prevents screen timeout and screensavers on the target
 **Key characteristics:**
 - **Independent operation**: Works regardless of relay state (even when you're using the Pi desktop locally)
 - **Activity-aware**: Timer resets whenever you use your Bluetooth keyboard or mouse
-- **Random movement**: Moves 1 pixel in random directions (up, down, left, right, or diagonally) to appear more natural
+- **Random movement**: Moves 2 pixels in random directions (up, down, left, right, or diagonally) to appear more natural
 - **Toggle shortcut**: Press `CTRL` + `SHIFT` + `F11` (default) to enable/disable the jiggler without restarting the service
 - **No interference**: Operates only on the USB OTG output, never affects local Pi input
 

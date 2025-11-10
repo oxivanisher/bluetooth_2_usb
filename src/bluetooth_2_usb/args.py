@@ -45,7 +45,7 @@ class CustomArgumentParser(argparse.ArgumentParser):
             "-j",
             action="store_true",
             default=False,
-            help="Enable mouse jiggler to prevent screen timeout. Moves mouse 1 pixel every ~2 minutes if no input activity detected.\nDefault: disabled",
+            help="Enable mouse jiggler to prevent screen timeout. Moves mouse 2 pixels every ~2 minutes if no input activity detected.\nDefault: disabled",
         )
         self.add_argument(
             "--jiggler_shortcut",
