@@ -214,17 +214,20 @@ class MouseJiggler:
         self,
         gadget_manager: GadgetManager,
         jiggler_enabled: asyncio.Event,
+        usb_connected: asyncio.Event,
         base_interval: float = 120.0,
         jitter: float = 15.0,
     ) -> None:
         """
         :param gadget_manager: Provides access to the USB HID mouse gadget
-        :param jiggler_enabled: Event indicating if jiggler is enabled
+        :param jiggler_enabled: Event indicating if jiggler is enabled by user
+        :param usb_connected: Event indicating if USB is connected and configured (from UDC state)
         :param base_interval: Base interval in seconds between jiggles (default: 120s / 2 minutes)
         :param jitter: Random jitter in seconds to add/subtract from base_interval (default: ±15s)
         """
         self.gadget_manager = gadget_manager
         self.jiggler_enabled = jiggler_enabled
+        self.usb_connected = usb_connected
         self.base_interval = base_interval
         self.jitter = jitter
 
@@ -277,8 +280,11 @@ class MouseJiggler:
                 # Wait for the next check interval (use a shorter sleep for responsiveness)
                 await asyncio.sleep(1.0)
 
-                # Only jiggle if jiggler is enabled
+                # Only jiggle if jiggler is enabled AND USB is connected
                 if not self.jiggler_enabled.is_set():
+                    continue
+
+                if not self.usb_connected.is_set():
                     continue
 
                 time_since_activity = time.monotonic() - self._last_activity_time

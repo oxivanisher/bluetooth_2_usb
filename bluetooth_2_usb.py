@@ -108,6 +108,7 @@ async def main() -> None:
         mouse_jiggler = MouseJiggler(
             gadget_manager=gadget_manager,
             jiggler_enabled=jiggler_enabled,
+            usb_connected=relaying_active,  # relaying_active tracks UDC state (USB connected)
         )
 
         # Set up jiggler toggle shortcut
