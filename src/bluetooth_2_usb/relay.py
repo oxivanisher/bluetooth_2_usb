@@ -234,6 +234,7 @@ class MouseJiggler:
         self._last_activity_time = time.monotonic()
         self._stop = False
         self._task: Optional[asyncio.Task] = None
+        self._next_jiggle_interval = self._get_next_interval()  # Calculate initial interval
 
     async def __aenter__(self):
         """
@@ -241,7 +242,7 @@ class MouseJiggler:
         """
         self._stop = False
         self._task = asyncio.create_task(self._jiggle_loop())
-        _logger.debug("MouseJiggler: Started jiggle loop.")
+        _logger.debug(f"MouseJiggler: Started jiggle loop (first jiggle in {self._next_jiggle_interval:.1f}s).")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -258,8 +259,10 @@ class MouseJiggler:
     def reset_timer(self) -> None:
         """
         Reset the activity timer. Should be called whenever input is relayed to USB.
+        Also recalculates the next jiggle interval.
         """
         self._last_activity_time = time.monotonic()
+        self._next_jiggle_interval = self._get_next_interval()
 
     def _get_next_interval(self) -> float:
         """
@@ -288,12 +291,12 @@ class MouseJiggler:
                     continue
 
                 time_since_activity = time.monotonic() - self._last_activity_time
-                next_interval = self._get_next_interval()
 
-                if time_since_activity >= next_interval:
+                if time_since_activity >= self._next_jiggle_interval:
                     self._perform_jiggle()
-                    # Reset timer after jiggling
+                    # Reset timer and calculate next interval after jiggling
                     self.reset_timer()
+                    _logger.debug(f"MouseJiggler: Next jiggle in {self._next_jiggle_interval:.1f}s")
 
             except asyncio.CancelledError:
                 break
