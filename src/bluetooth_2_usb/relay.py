@@ -260,12 +260,12 @@ class MouseJiggler:
     def reset_timer(self) -> None:
         """
         Reset the jiggle timer. Should be called whenever input is relayed to USB.
-        Sets a new random target time approximately 2 minutes from now.
+        Simply pushes the target time forward without recalculating randomness.
         """
         current_time = time.monotonic()
-        interval = self._get_next_interval()
-        self._next_jiggle_time = current_time + interval
-        _logger.debug(f"MouseJiggler: Timer reset, next jiggle in {interval:.1f}s")
+        # Only push forward if we're not already far enough in the future
+        if self._next_jiggle_time < current_time + self.base_interval:
+            self._next_jiggle_time = current_time + self.base_interval
 
     def _get_next_interval(self) -> float:
         """
