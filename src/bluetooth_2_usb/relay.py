@@ -325,16 +325,16 @@ class MouseJiggler:
         try:
             # Randomly choose direction for each axis
             # 50% chance to move on X axis, 50% on Y axis, can be both
-            x_move = random.choice([-1, 0, 1])
-            y_move = random.choice([-1, 0, 1])
+            x_move = random.choice([-2, 0, 2])
+            y_move = random.choice([-2, 0, 2])
 
             # Ensure we move at least in one direction
             if x_move == 0 and y_move == 0:
                 # If both are 0, pick a random axis and direction
                 if random.choice([True, False]):
-                    x_move = random.choice([-1, 1])
+                    x_move = random.choice([-2, 2])
                 else:
-                    y_move = random.choice([-1, 1])
+                    y_move = random.choice([-2, 2])
 
             mouse.move(x=x_move, y=y_move)
             _logger.debug(f"MouseJiggler: Jiggled mouse (x={x_move:+d}, y={y_move:+d})")
