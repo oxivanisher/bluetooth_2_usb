@@ -28,7 +28,8 @@ Linux's gadget mode allows a Raspberry Pi to act as USB HID (Human Interface Dev
     - [4.1.2. Raspberry Pi Zero (2) W(H)](#412-raspberry-pi-zero-2-wh)
   - [4.2. Command-line arguments](#42-command-line-arguments)
   - [4.3. Shortcut Feature for Quick Pi Administration](#43-shortcut-feature-for-quick-pi-administration)
-  - [4.4. Consuming the API from your Python code](#44-consuming-the-api-from-your-python-code)
+  - [4.4. Mouse Jiggler Feature](#44-mouse-jiggler-feature)
+  - [4.5. Consuming the API from your Python code](#45-consuming-the-api-from-your-python-code)
 - [5. Updating](#5-updating)
 - [6. Uninstallation](#6-uninstallation)
 - [7. Troubleshooting](#7-troubleshooting)
@@ -50,6 +51,7 @@ Linux's gadget mode allows a Raspberry Pi to act as USB HID (Human Interface Dev
 - Auto-discovery feature for input devices
 - Auto-reconnect feature for input devices (power off, energy saving mode, out of range, etc.)
 - Pause/resume relaying input devices via [configurable shortcut](#43-shortcut-feature-for-quick-pi-administration)
+- Mouse jiggler to prevent screen timeout on the target device via [configurable shortcut](#44-mouse-jiggler-feature)
 - Robust error handling and logging
 - Installation as a systemd service
 - Reliable concurrency using state-of-the-art [TaskGroups](https://docs.python.org/3/library/asyncio-task.html#task-groups)
@@ -179,7 +181,7 @@ Currently you can provide the following CLI arguments:
 
 ```console
 user@pi0w:~ $ bluetooth_2_usb -h
-usage: bluetooth_2_usb.py [--device_ids DEVICE_IDS] [--auto_discover] [--grab_devices] [--interrupt_shortcut INTERRUPT_SHORTCUT] [--list_devices] [--log_to_file] [--log_path LOG_PATH] [--debug] [--version] [--help]
+usage: bluetooth_2_usb.py [--device_ids DEVICE_IDS] [--auto_discover] [--grab_devices] [--mouse_jiggler] [--jiggler_shortcut JIGGLER_SHORTCUT] [--interrupt_shortcut INTERRUPT_SHORTCUT] [--list_devices] [--log_to_file] [--log_path LOG_PATH] [--debug] [--version] [--help]
 
 Bluetooth to USB HID relay. Handles Bluetooth keyboard and mouse events from multiple input devices and translates them to USB using Linux's gadget mode.
 
@@ -193,6 +195,11 @@ options:
                         Default: disabled
   --grab_devices, -g    Grab the input devices, i.e., suppress any events on your relay device.
                         Devices are not grabbed by default.
+  --mouse_jiggler, -j   Enable mouse jiggler to prevent screen timeout. Moves mouse 1 pixel every ~2 minutes if no input activity detected.
+                        Default: disabled
+  --jiggler_shortcut JIGGLER_SHORTCUT, -js JIGGLER_SHORTCUT
+                        A plus-separated list of key names to press simultaneously in order to toggle mouse jiggler on/off. Only works if --mouse_jiggler is enabled. Example: CTRL+SHIFT+F11
+                        Default: CTRL+SHIFT+F11
   --interrupt_shortcut INTERRUPT_SHORTCUT, -s INTERRUPT_SHORTCUT
                         A plus-separated list of key names to press simultaneously in order to toggle relaying (pause/resume). Example: CTRL+SHIFT+Q
                         Default: None (feature disabled)
@@ -211,7 +218,40 @@ options:
 
 A key challenge when using Bluetooth 2 USB on a Raspberry Pi as systemd service is being able to temporarily disable input relaying so you can administer the Pi locally. The shortcut feature solves this by allowing you to specify a keyboard shortcut that toggles the relaying on or off at any time. For example, you might configure `CTRL` + `SHIFT` + `F12` (default set in `bluetooth_2_usb.service`) as a global interrupt shortcut. While relaying is active, pressing that key combination will instantly halt relaying, allowing the Pi to receive keyboard input locally. Pressing the same shortcut again re-enables relaying.
 
-### 4.4. Consuming the API from your Python code
+### 4.4. Mouse Jiggler Feature
+
+The mouse jiggler feature prevents screen timeout and screensavers on the target device by automatically moving the mouse cursor by 1 pixel in a random direction approximately every 2 minutes (with ±15 seconds randomness) when no input activity is detected. This feature is particularly useful for:
+
+- Keeping remote desktop connections alive
+- Preventing screensavers or screen lock on the target device
+- Maintaining active sessions during presentations or monitoring
+
+**Key characteristics:**
+- **Independent operation**: Works regardless of relay state (even when you're using the Pi desktop locally)
+- **Activity-aware**: Timer resets whenever you use your Bluetooth keyboard or mouse
+- **Random movement**: Moves 1 pixel in random directions (up, down, left, right, or diagonally) to appear more natural
+- **Toggle shortcut**: Press `CTRL` + `SHIFT` + `F11` (default) to enable/disable the jiggler without restarting the service
+- **No interference**: Operates only on the USB OTG output, never affects local Pi input
+
+**Usage examples:**
+
+```console
+# Enable mouse jiggler with default settings
+sudo bluetooth_2_usb -a -g -j
+
+# Enable with custom toggle shortcut
+sudo bluetooth_2_usb -a -g -j -js CTRL+ALT+F10
+
+# Full setup with both relay and jiggler shortcuts
+sudo bluetooth_2_usb -a -g -j -js CTRL+SHIFT+F11 -s CTRL+SHIFT+F12
+```
+
+**Behavior:**
+- When relaying is **ON** (devices control target): Jiggler keeps target awake
+- When relaying is **OFF** (devices control Pi): Jiggler still keeps target awake via USB
+- Both shortcuts work in both states for maximum flexibility
+
+### 4.5. Consuming the API from your Python code
 
 The API is designed such that it may be consumed both via CLI and from within external Python code. More details on this [coming soon](https://github.com/quaxalber/bluetooth_2_usb/issues/16)!
 
