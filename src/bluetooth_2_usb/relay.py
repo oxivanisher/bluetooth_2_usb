@@ -144,10 +144,13 @@ class ShortcutToggler:
     def toggle_relaying(self) -> None:
         """
         Toggle the global relaying state: if it was on, turn it off, otherwise turn it on.
+        Explicitly releases shortcut keys on USB to prevent stuck keys.
         """
+        keyboard = self.gadget_manager.get_keyboard()
+        mouse = self.gadget_manager.get_mouse()
+
         if self.relaying_active.is_set():
-            keyboard = self.gadget_manager.get_keyboard()
-            mouse = self.gadget_manager.get_mouse()
+            # Turning OFF: Release all keys and mouse buttons
             if keyboard:
                 keyboard.release_all()
             if mouse:
@@ -157,6 +160,12 @@ class ShortcutToggler:
             self.relaying_active.clear()
             _logger.info("ShortcutToggler: Relaying is now OFF.")
         else:
+            # Turning ON: Release all to ensure clean state (in case shortcut keys still held)
+            if keyboard:
+                keyboard.release_all()
+            if mouse:
+                mouse.release_all()
+
             self.relaying_active.set()
             _logger.info("ShortcutToggler: Relaying is now ON.")
 
@@ -820,20 +829,23 @@ def get_output_device(
 class UdcStateMonitor:
     """
     Monitors the UDC (USB Device Controller) state and
-    sets/clears an Event when the device is configured or not.
+    sets/clears Events when the device is configured or not.
     """
 
     def __init__(
         self,
+        udc_connected: asyncio.Event,
         relaying_active: asyncio.Event,
         udc_path: Path = Path("/sys/class/udc/20980000.usb/state"),
         poll_interval: float = 0.5,
     ) -> None:
         """
-        :param relaying_active: Event controlling whether relaying is active
+        :param udc_connected: Event tracking USB connection state (only managed by UDC monitor)
+        :param relaying_active: Event controlling whether relaying is active (can be toggled by user)
         :param udc_path: Path to the UDC state file
         :param poll_interval: Interval (seconds) to re-check the UDC state
         """
+        self._udc_connected = udc_connected
         self._relaying_active = relaying_active
         self.udc_path = udc_path
         self.poll_interval = poll_interval
@@ -888,16 +900,18 @@ class UdcStateMonitor:
 
     def _handle_state_change(self, new_state: str):
         """
-        Handle a change in the UDC state. If "configured", set relaying_active.
-        Otherwise clear it.
+        Handle a change in the UDC state. If "configured", set both events.
+        Otherwise clear both events.
 
         :param new_state: The new UDC state
         """
         _logger.debug(f"UDC state changed to '{new_state}'")
 
         if new_state == "configured":
+            self._udc_connected.set()
             self._relaying_active.set()
         else:
+            self._udc_connected.clear()
             self._relaying_active.clear()
 
 

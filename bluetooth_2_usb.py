@@ -80,7 +80,11 @@ async def main() -> None:
     logger.debug(log_handlers_message)
     logger.info(f"Launching {VERSIONED_NAME}")
 
-    relaying_active = asyncio.Event()
+    # Separate events for USB connection state vs relay toggle
+    udc_connected = asyncio.Event()  # Tracks USB connection state (managed by UdcStateMonitor)
+    udc_connected.clear()
+
+    relaying_active = asyncio.Event()  # Tracks if relaying is enabled (can be toggled by user)
     relaying_active.clear()
 
     gadget_manager = GadgetManager()
@@ -108,7 +112,7 @@ async def main() -> None:
         mouse_jiggler = MouseJiggler(
             gadget_manager=gadget_manager,
             jiggler_enabled=jiggler_enabled,
-            usb_connected=relaying_active,  # relaying_active tracks UDC state (USB connected)
+            usb_connected=udc_connected,  # Use UDC state, not relay toggle state
         )
 
         # Set up jiggler toggle shortcut
@@ -141,7 +145,8 @@ async def main() -> None:
     context_managers = [
         UdevEventMonitor(relay_controller),
         UdcStateMonitor(
-            relaying_active=relaying_active,
+            udc_connected=udc_connected,  # UDC monitor controls USB connection state
+            relaying_active=relaying_active,  # UDC also controls relay state
             udc_path=udc_path,
         ),
     ]
