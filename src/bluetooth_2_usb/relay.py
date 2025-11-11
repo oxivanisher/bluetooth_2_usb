@@ -114,6 +114,7 @@ class ShortcutToggler:
         self.gadget_manager = gadget_manager
 
         self.currently_pressed: set[str] = set()
+        self._shortcut_triggered = False  # Prevent multiple toggles while held
 
     def handle_key_event(self, event: KeyEvent) -> None:
         """
@@ -130,9 +131,15 @@ class ShortcutToggler:
             self.currently_pressed.add(key_name)
         elif event.keystate == KeyEvent.key_up:
             self.currently_pressed.discard(key_name)
+            # Reset trigger flag when any key is released
+            if not self.shortcut_keys.issubset(self.currently_pressed):
+                self._shortcut_triggered = False
 
+        # Only trigger once when shortcut is first detected
         if self.shortcut_keys and self.shortcut_keys.issubset(self.currently_pressed):
-            self.toggle_relaying()
+            if not self._shortcut_triggered:
+                self._shortcut_triggered = True
+                self.toggle_relaying()
 
     def toggle_relaying(self) -> None:
         """
@@ -172,6 +179,7 @@ class JigglerToggler:
         self.jiggler_enabled = jiggler_enabled
 
         self.currently_pressed: set[str] = set()
+        self._shortcut_triggered = False  # Prevent multiple toggles while held
 
     def handle_key_event(self, event: KeyEvent) -> None:
         """
@@ -188,9 +196,15 @@ class JigglerToggler:
             self.currently_pressed.add(key_name)
         elif event.keystate == KeyEvent.key_up:
             self.currently_pressed.discard(key_name)
+            # Reset trigger flag when any key is released
+            if not self.shortcut_keys.issubset(self.currently_pressed):
+                self._shortcut_triggered = False
 
+        # Only trigger once when shortcut is first detected
         if self.shortcut_keys and self.shortcut_keys.issubset(self.currently_pressed):
-            self.toggle_jiggler()
+            if not self._shortcut_triggered:
+                self._shortcut_triggered = True
+                self.toggle_jiggler()
 
     def toggle_jiggler(self) -> None:
         """
@@ -298,10 +312,19 @@ class MouseJiggler:
                 # Check if it's time to jiggle
                 if current_time >= self._next_jiggle_time:
                     # Time to jiggle! But only if enabled and USB is connected
-                    if self.jiggler_enabled.is_set() and self.usb_connected.is_set():
+                    jiggler_enabled = self.jiggler_enabled.is_set()
+                    usb_connected = self.usb_connected.is_set()
+
+                    if jiggler_enabled and usb_connected:
                         self._perform_jiggle()
                     else:
-                        _logger.debug("MouseJiggler: Jiggle timer expired but jiggling is disabled or USB not connected")
+                        # Log why jiggle was skipped
+                        if not jiggler_enabled and not usb_connected:
+                            _logger.info("MouseJiggler: Jiggle skipped (disabled by user and USB not connected)")
+                        elif not jiggler_enabled:
+                            _logger.info("MouseJiggler: Jiggle skipped (disabled by user)")
+                        elif not usb_connected:
+                            _logger.info("MouseJiggler: Jiggle skipped (USB not connected)")
 
                     # Set next jiggle time (regardless of whether we jiggled or not)
                     interval = self._get_next_interval()
@@ -337,7 +360,7 @@ class MouseJiggler:
                     y_move = random.choice([-2, 2])
 
             mouse.move(x=x_move, y=y_move)
-            _logger.debug(f"MouseJiggler: Jiggled mouse (x={x_move:+d}, y={y_move:+d})")
+            _logger.info(f"MouseJiggler: Jiggled mouse (x={x_move:+d}, y={y_move:+d})")
         except Exception as ex:
             _logger.warning(f"MouseJiggler: Failed to jiggle mouse: {ex}")
 
