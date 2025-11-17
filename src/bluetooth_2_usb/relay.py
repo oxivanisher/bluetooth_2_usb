@@ -179,13 +179,16 @@ class JigglerToggler:
         self,
         shortcut_keys: set[str],
         jiggler_enabled: asyncio.Event,
+        gadget_manager: GadgetManager,
     ) -> None:
         """
         :param shortcut_keys: A set of evdev-style key names to detect
         :param jiggler_enabled: An asyncio.Event controlling whether jiggler is enabled
+        :param gadget_manager: GadgetManager to release keyboard/mouse states on toggle
         """
         self.shortcut_keys = shortcut_keys
         self.jiggler_enabled = jiggler_enabled
+        self.gadget_manager = gadget_manager
 
         self.currently_pressed: set[str] = set()
         self._shortcut_triggered = False  # Prevent multiple toggles while held
@@ -218,7 +221,17 @@ class JigglerToggler:
     def toggle_jiggler(self) -> None:
         """
         Toggle the jiggler enabled state: if it was on, turn it off, otherwise turn it on.
+        Explicitly releases shortcut keys on USB to prevent stuck keys.
         """
+        keyboard = self.gadget_manager.get_keyboard()
+        mouse = self.gadget_manager.get_mouse()
+
+        # Release all keys and mouse buttons to prevent stuck keys from shortcut
+        if keyboard:
+            keyboard.release_all()
+        if mouse:
+            mouse.release_all()
+
         if self.jiggler_enabled.is_set():
             self.jiggler_enabled.clear()
             _logger.info("JigglerToggler: Mouse jiggler is now OFF.")
