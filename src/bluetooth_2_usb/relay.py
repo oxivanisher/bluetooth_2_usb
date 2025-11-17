@@ -116,16 +116,18 @@ class ShortcutToggler:
         self.currently_pressed: set[str] = set()
         self._shortcut_triggered = False  # Prevent multiple toggles while held
 
-    def handle_key_event(self, event: KeyEvent) -> None:
+    def handle_key_event(self, event: KeyEvent) -> bool:
         """
         Process a key press or release to detect the toggle shortcut.
 
         :param event: The incoming KeyEvent from evdev
         :type event: KeyEvent
+        :return: True if the event should be consumed (not forwarded), False otherwise
+        :rtype: bool
         """
         key_name = find_key_name(event)
         if key_name is None:
-            return
+            return False
 
         if event.keystate == KeyEvent.key_down:
             self.currently_pressed.add(key_name)
@@ -140,6 +142,10 @@ class ShortcutToggler:
             if not self._shortcut_triggered:
                 self._shortcut_triggered = True
                 self.toggle_relaying()
+            # Consume the event when all shortcut keys are pressed
+            return True
+
+        return False
 
     def toggle_relaying(self) -> None:
         """
@@ -193,16 +199,18 @@ class JigglerToggler:
         self.currently_pressed: set[str] = set()
         self._shortcut_triggered = False  # Prevent multiple toggles while held
 
-    def handle_key_event(self, event: KeyEvent) -> None:
+    def handle_key_event(self, event: KeyEvent) -> bool:
         """
         Process a key press or release to detect the toggle shortcut.
 
         :param event: The incoming KeyEvent from evdev
         :type event: KeyEvent
+        :return: True if the event should be consumed (not forwarded), False otherwise
+        :rtype: bool
         """
         key_name = find_key_name(event)
         if key_name is None:
-            return
+            return False
 
         if event.keystate == KeyEvent.key_down:
             self.currently_pressed.add(key_name)
@@ -217,6 +225,10 @@ class JigglerToggler:
             if not self._shortcut_triggered:
                 self._shortcut_triggered = True
                 self.toggle_jiggler()
+            # Consume the event when all shortcut keys are pressed
+            return True
+
+        return False
 
     def toggle_jiggler(self) -> None:
         """
@@ -639,11 +651,16 @@ class DeviceRelay:
                 )
 
             # Handle shortcuts before checking relay state (shortcuts work even when relaying is paused)
+            event_consumed = False
             if isinstance(event, KeyEvent):
                 if self._shortcut_toggler:
-                    self._shortcut_toggler.handle_key_event(event)
+                    event_consumed |= self._shortcut_toggler.handle_key_event(event)
                 if self._jiggler_toggler:
-                    self._jiggler_toggler.handle_key_event(event)
+                    event_consumed |= self._jiggler_toggler.handle_key_event(event)
+
+            # Skip forwarding if event was consumed by a shortcut
+            if event_consumed:
+                continue
 
             active = self._relaying_active and self._relaying_active.is_set()
 
@@ -917,45 +934,27 @@ class UdcStateMonitor:
 
     def _handle_state_change(self, new_state: str):
         """
-        Handle a change in the UDC state. Manages state transitions and re-initializes
-        gadgets when recovering from sleep/disconnect.
+        Handle a change in the UDC state. Releases all keys/buttons when state changes
+        to prevent stuck keys on sleep/wake cycles.
 
         :param new_state: The new UDC state
         """
         prev_state = self._last_state
-        _logger.info(f"UDC state transition: '{prev_state}' → '{new_state}'")
 
-        # Detect if we're transitioning TO a connected state (wake/reconnect)
-        transitioning_to_configured = (
-            new_state == "configured" and prev_state not in ("configured", None)
-        )
+        # Only log state changes at info level if the state actually changed
+        if prev_state != new_state:
+            _logger.info(f"UDC state transition: '{prev_state}' → '{new_state}'")
 
-        # Detect if we're transitioning FROM a connected state (sleep/disconnect)
-        transitioning_from_configured = (
-            prev_state == "configured" and new_state != "configured"
-        )
-
-        # Handle transition FROM configured (going to sleep/disconnect)
-        if transitioning_from_configured:
-            _logger.info("USB host disconnecting or entering sleep - releasing all keys")
+            # Release all keys and buttons on any state change to prevent stuck keys
             keyboard = self._gadget_manager.get_keyboard()
             mouse = self._gadget_manager.get_mouse()
 
-            # Release all keys and buttons to prevent them getting stuck
             if keyboard:
                 keyboard.release_all()
             if mouse:
                 mouse.release_all()
 
-        # Handle transition TO configured (waking up/reconnecting)
-        if transitioning_to_configured:
-            _logger.info("USB host reconnecting or waking from sleep - re-initializing gadgets")
-            try:
-                # Re-initialize gadgets to ensure clean state after sleep/wake
-                self._gadget_manager.enable_gadgets()
-                _logger.info("USB HID gadgets successfully re-initialized")
-            except Exception as ex:
-                _logger.error(f"Failed to re-initialize gadgets: {ex}")
+            _logger.debug("Released all keys/buttons due to UDC state change")
 
         # Update connection and relay state based on new state
         if new_state == "configured":
