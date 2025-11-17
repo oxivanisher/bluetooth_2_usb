@@ -148,6 +148,7 @@ async def main() -> None:
         UdcStateMonitor(
             udc_connected=udc_connected,  # UDC monitor controls USB connection state
             relaying_active=relaying_active,  # UDC also controls relay state
+            gadget_manager=gadget_manager,  # Pass gadget manager for re-initialization on sleep/wake
             udc_path=udc_path,
         ),
     ]

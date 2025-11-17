@@ -843,23 +843,27 @@ class UdcStateMonitor:
     """
     Monitors the UDC (USB Device Controller) state and
     sets/clears Events when the device is configured or not.
+    Re-initializes USB HID gadgets on state transitions to handle sleep/wake cycles.
     """
 
     def __init__(
         self,
         udc_connected: asyncio.Event,
         relaying_active: asyncio.Event,
+        gadget_manager: GadgetManager,
         udc_path: Path = Path("/sys/class/udc/20980000.usb/state"),
         poll_interval: float = 0.5,
     ) -> None:
         """
         :param udc_connected: Event tracking USB connection state (only managed by UDC monitor)
         :param relaying_active: Event controlling whether relaying is active (can be toggled by user)
+        :param gadget_manager: GadgetManager to re-initialize gadgets on state transitions
         :param udc_path: Path to the UDC state file
         :param poll_interval: Interval (seconds) to re-check the UDC state
         """
         self._udc_connected = udc_connected
         self._relaying_active = relaying_active
+        self._gadget_manager = gadget_manager
         self.udc_path = udc_path
         self.poll_interval = poll_interval
 
@@ -913,13 +917,47 @@ class UdcStateMonitor:
 
     def _handle_state_change(self, new_state: str):
         """
-        Handle a change in the UDC state. If "configured", set both events.
-        Otherwise clear both events.
+        Handle a change in the UDC state. Manages state transitions and re-initializes
+        gadgets when recovering from sleep/disconnect.
 
         :param new_state: The new UDC state
         """
-        _logger.debug(f"UDC state changed to '{new_state}'")
+        prev_state = self._last_state
+        _logger.info(f"UDC state transition: '{prev_state}' → '{new_state}'")
 
+        # Detect if we're transitioning TO a connected state (wake/reconnect)
+        transitioning_to_configured = (
+            new_state == "configured" and prev_state not in ("configured", None)
+        )
+
+        # Detect if we're transitioning FROM a connected state (sleep/disconnect)
+        transitioning_from_configured = (
+            prev_state == "configured" and new_state != "configured"
+        )
+
+        # Handle transition FROM configured (going to sleep/disconnect)
+        if transitioning_from_configured:
+            _logger.info("USB host disconnecting or entering sleep - releasing all keys")
+            keyboard = self._gadget_manager.get_keyboard()
+            mouse = self._gadget_manager.get_mouse()
+
+            # Release all keys and buttons to prevent them getting stuck
+            if keyboard:
+                keyboard.release_all()
+            if mouse:
+                mouse.release_all()
+
+        # Handle transition TO configured (waking up/reconnecting)
+        if transitioning_to_configured:
+            _logger.info("USB host reconnecting or waking from sleep - re-initializing gadgets")
+            try:
+                # Re-initialize gadgets to ensure clean state after sleep/wake
+                self._gadget_manager.enable_gadgets()
+                _logger.info("USB HID gadgets successfully re-initialized")
+            except Exception as ex:
+                _logger.error(f"Failed to re-initialize gadgets: {ex}")
+
+        # Update connection and relay state based on new state
         if new_state == "configured":
             self._udc_connected.set()
             self._relaying_active.set()
