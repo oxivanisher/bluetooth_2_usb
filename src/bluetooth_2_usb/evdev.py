@@ -1165,6 +1165,10 @@ _EVDEV_TO_USB_HID: dict[int, int] = {
     ecodes.BTN_LEFT: MouseButton.LEFT,
     ecodes.BTN_RIGHT: MouseButton.RIGHT,
     ecodes.BTN_MIDDLE: MouseButton.MIDDLE,
+    ecodes.BTN_SIDE: MouseButton.BACK,
+    ecodes.BTN_EXTRA: MouseButton.FORWARD,
+    ecodes.BTN_FORWARD: MouseButton.FORWARD,
+    ecodes.BTN_BACK: MouseButton.BACK,
     # Mapping from evdev ecodes to HID UsageIDs from consumer page (0x0C): https://github.com/torvalds/linux/blob/11d3f72613957cba0783938a1ceddffe7dbbf5a1/drivers/hid/hid-input.c#L1069
     ecodes.KEY_POWER: ConsumerControlCode.POWER,
     ecodes.KEY_RESTART: ConsumerControlCode.RESET,
@@ -1468,6 +1472,10 @@ _MOUSE_BUTTONS = set(
         ecodes.BTN_LEFT,
         ecodes.BTN_RIGHT,
         ecodes.BTN_MIDDLE,
+        ecodes.BTN_SIDE,
+        ecodes.BTN_EXTRA,
+        ecodes.BTN_FORWARD,
+        ecodes.BTN_BACK,
     )
 )
 """Mouse button ecodes"""
