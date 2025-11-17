@@ -122,6 +122,7 @@ async def main() -> None:
             jiggler_toggler = JigglerToggler(
                 shortcut_keys=shortcut_keys,
                 jiggler_enabled=jiggler_enabled,
+                gadget_manager=gadget_manager,
             )
 
     relay_controller = RelayController(
