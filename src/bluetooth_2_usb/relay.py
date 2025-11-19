@@ -54,8 +54,8 @@ class GadgetManager:
             _logger.debug("USB HID gadgets already enabled, skipping re-initialization")
             return
 
-        # Try BOOT_KEYBOARD to match BOOT_MOUSE protocol
-        usb_hid.enable([Device.BOOT_KEYBOARD, Device.BOOT_MOUSE])  # type: ignore
+        # Use boot protocol for both - BOOT_MOUSE must be first for correct device assignment
+        usb_hid.enable([Device.BOOT_MOUSE, Device.BOOT_KEYBOARD])  # type: ignore
         enabled_devices = list(usb_hid.devices)  # type: ignore
 
         _logger.info(f"Enabled devices: {enabled_devices}")
