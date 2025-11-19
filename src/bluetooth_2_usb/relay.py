@@ -430,7 +430,7 @@ class RelayController:
         self._gadget_manager = gadget_manager
         self._device_ids = [DeviceIdentifier(id) for id in (device_identifiers or [])]
         self._auto_discover = auto_discover
-        self._skip_name_prefixes = skip_name_prefixes or ["vc4-hdmi"]
+        self._skip_name_prefixes = skip_name_prefixes or ["vc4-hdmi", "pwr_button"]
         self._grab_devices = grab_devices
         self._relaying_active = relaying_active
         self._shortcut_toggler = shortcut_toggler
@@ -547,10 +547,20 @@ class RelayController:
         :rtype: bool
         """
         name_lower = device.name.lower()
+        phys_lower = (device.phys or "").lower()
+
         if self._auto_discover:
+            # Skip devices by name prefix
             for prefix in self._skip_name_prefixes:
                 if name_lower.startswith(prefix.lower()):
+                    _logger.debug(f"Skipping device '{device.name}' (matches skip prefix '{prefix}')")
                     return False
+
+            # Skip GPIO-based devices (like Raspberry Pi power button)
+            if "gpio" in phys_lower:
+                _logger.debug(f"Skipping device '{device.name}' (GPIO-based device: {device.phys})")
+                return False
+
             return True
 
         return any(identifier.matches(device) for identifier in self._device_ids)
