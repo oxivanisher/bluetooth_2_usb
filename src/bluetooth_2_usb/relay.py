@@ -55,7 +55,7 @@ class GadgetManager:
         except Exception as ex:
             _logger.debug(f"usb_hid.disable() failed or was already disabled: {ex}")
 
-        usb_hid.enable([Device.BOOT_MOUSE, Device.KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
+        usb_hid.enable([Device.BOOT_MOUSE, Device.BOOT_KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
         enabled_devices = list(usb_hid.devices)  # type: ignore
 
         self._gadgets["keyboard"] = Keyboard(enabled_devices)
