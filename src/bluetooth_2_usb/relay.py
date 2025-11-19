@@ -54,18 +54,22 @@ class GadgetManager:
             _logger.debug("USB HID gadgets already enabled, skipping re-initialization")
             return
 
-        usb_hid.enable([Device.BOOT_MOUSE, Device.KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
+        # TEMPORARY: Try without CONSUMER_CONTROL to debug Windows keyboard issue
+        usb_hid.enable([Device.BOOT_MOUSE, Device.KEYBOARD])  # type: ignore
         enabled_devices = list(usb_hid.devices)  # type: ignore
 
         self._gadgets["keyboard"] = Keyboard(enabled_devices)
         self._gadgets["mouse"] = Mouse(enabled_devices)
-        self._gadgets["consumer"] = ConsumerControl(enabled_devices)
+        # TEMPORARY: Skip consumer control for Windows debugging
+        # self._gadgets["consumer"] = ConsumerControl(enabled_devices)
+        self._gadgets["consumer"] = None
         self._enabled = True
 
         # Send initial "all released" reports to help Windows recognize the devices
-        _logger.debug("Sending initial HID reports to host...")
+        _logger.info("Sending initial HID reports to host...")
         self._gadgets["keyboard"].release_all()
         self._gadgets["mouse"].release_all()
+        _logger.info("Initial HID reports sent")
 
         _logger.debug(f"USB HID gadgets initialized: {enabled_devices}")
 
@@ -665,10 +669,16 @@ class DeviceRelay:
         async for input_event in self._input_device.async_read_loop():
             event = categorize(input_event)
 
-            if any(isinstance(event, ev_type) for ev_type in [KeyEvent, RelEvent]):
+            # Only log KeyEvents to avoid flooding logs with mouse movements
+            if isinstance(event, KeyEvent):
                 _logger.debug(
                     f"Received {event} from {self._input_device.name} ({self._input_device.path})"
                 )
+            # Uncomment below to debug mouse movement issues:
+            # if isinstance(event, RelEvent):
+            #     _logger.debug(
+            #         f"Received {event} from {self._input_device.name} ({self._input_device.path})"
+            #     )
 
             # Handle shortcuts before checking relay state (shortcuts work even when relaying is paused)
             event_consumed = False
