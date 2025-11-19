@@ -65,11 +65,25 @@ class GadgetManager:
         self._gadgets["consumer"] = None
         self._enabled = True
 
-        # Send initial "all released" reports to help Windows recognize the devices
+        # Send initial HID reports to help Windows recognize and enumerate the devices
         _logger.info("Sending initial HID reports to host...")
+
+        # Release all first
         self._gadgets["keyboard"].release_all()
         self._gadgets["mouse"].release_all()
-        _logger.info("Initial HID reports sent")
+
+        # WORKAROUND: Send a dummy keypress to force Windows to recognize the keyboard
+        # Some Windows versions won't enumerate the keyboard until it sends actual data
+        import time
+        from adafruit_hid.keycode import Keycode
+        time.sleep(0.1)  # Small delay
+        self._gadgets["keyboard"].press(Keycode.SCROLL_LOCK)
+        time.sleep(0.05)
+        self._gadgets["keyboard"].release(Keycode.SCROLL_LOCK)
+        time.sleep(0.05)
+        self._gadgets["keyboard"].release_all()
+
+        _logger.info("Initial HID reports sent (including keyboard wake-up)")
 
         _logger.debug(f"USB HID gadgets initialized: {enabled_devices}")
 
