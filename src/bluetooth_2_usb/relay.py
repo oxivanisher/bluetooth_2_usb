@@ -47,15 +47,14 @@ class GadgetManager:
 
     def enable_gadgets(self) -> None:
         """
-        Disable and re-enable usb_hid devices, then store references
-        to the new Keyboard, Mouse, and ConsumerControl gadgets.
+        Enable usb_hid devices and store references to Keyboard, Mouse, and ConsumerControl gadgets.
+        Only enables once - does not disable first to avoid Windows compatibility issues.
         """
-        try:
-            usb_hid.disable()
-        except Exception as ex:
-            _logger.debug(f"usb_hid.disable() failed or was already disabled: {ex}")
+        if self._enabled:
+            _logger.debug("USB HID gadgets already enabled, skipping re-initialization")
+            return
 
-        usb_hid.enable([Device.BOOT_MOUSE, Device.BOOT_KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
+        usb_hid.enable([Device.BOOT_MOUSE, Device.KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
         enabled_devices = list(usb_hid.devices)  # type: ignore
 
         self._gadgets["keyboard"] = Keyboard(enabled_devices)
@@ -63,7 +62,7 @@ class GadgetManager:
         self._gadgets["consumer"] = ConsumerControl(enabled_devices)
         self._enabled = True
 
-        _logger.debug(f"USB HID gadgets re-initialized: {enabled_devices}")
+        _logger.debug(f"USB HID gadgets initialized: {enabled_devices}")
 
     def get_keyboard(self) -> Optional[Keyboard]:
         """
@@ -990,13 +989,9 @@ class UdcStateMonitor:
 
         # Handle transition TO configured (waking up/reconnecting)
         if transitioning_to_configured:
-            _logger.info("USB host reconnecting or waking from sleep - re-initializing gadgets")
-            try:
-                # Re-initialize gadgets to ensure clean state after sleep/wake
-                self._gadget_manager.enable_gadgets()
-                _logger.info("USB HID gadgets successfully re-initialized")
-            except Exception as ex:
-                _logger.error(f"Failed to re-initialize gadgets: {ex}")
+            _logger.info("USB host reconnecting or waking from sleep")
+            # Note: We no longer re-initialize gadgets here to avoid Windows compatibility issues
+            # Instead, we rely on release_all() being called during the FROM transition
 
         # Update connection and relay state based on new state
         if new_state == "configured":
