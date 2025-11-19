@@ -561,6 +561,12 @@ class RelayController:
                 _logger.debug(f"Skipping device '{device.name}' (GPIO-based device: {device.phys})")
                 return False
 
+            # TEMPORARY: Skip keyboard devices that present as "Mouse" to debug Windows issue
+            # Example: "Keychron K8 Pro Mouse" should be skipped
+            if "mouse" in name_lower and ("keychron" in name_lower or "k8" in name_lower):
+                _logger.info(f"Skipping '{device.name}' (keyboard's mouse interface)")
+                return False
+
             return True
 
         return any(identifier.matches(device) for identifier in self._device_ids)
@@ -678,6 +684,12 @@ class DeviceRelay:
                 _logger.warning(
                     f"Keyboard event blocked - relaying_active is not set. "
                     f"Event: {event}, Device: {self._input_device.name}"
+                )
+
+            # Log events from devices with "Mouse" in the name for debugging
+            if "mouse" in self._input_device.name.lower() and isinstance(event, KeyEvent):
+                _logger.info(
+                    f"KeyEvent from '{self._input_device.name}': {event}"
                 )
 
             # Dynamically grab/ungrab if relaying state changes
