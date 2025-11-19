@@ -54,12 +54,18 @@ class GadgetManager:
             _logger.debug("USB HID gadgets already enabled, skipping re-initialization")
             return
 
-        # TEMPORARY: Try without CONSUMER_CONTROL to debug Windows keyboard issue
-        usb_hid.enable([Device.BOOT_MOUSE, Device.KEYBOARD])  # type: ignore
+        # Try BOOT_KEYBOARD to match BOOT_MOUSE protocol
+        usb_hid.enable([Device.BOOT_KEYBOARD, Device.BOOT_MOUSE])  # type: ignore
         enabled_devices = list(usb_hid.devices)  # type: ignore
 
+        _logger.info(f"Enabled devices: {enabled_devices}")
+
+        # Create keyboard and mouse - order matters!
         self._gadgets["keyboard"] = Keyboard(enabled_devices)
         self._gadgets["mouse"] = Mouse(enabled_devices)
+
+        _logger.info(f"Keyboard gadget device: {self._gadgets['keyboard']._keyboard_device if hasattr(self._gadgets['keyboard'], '_keyboard_device') else 'unknown'}")
+        _logger.info(f"Mouse gadget device: {self._gadgets['mouse']._mouse_device if hasattr(self._gadgets['mouse'], '_mouse_device') else 'unknown'}")
         # TEMPORARY: Skip consumer control for Windows debugging
         # self._gadgets["consumer"] = ConsumerControl(enabled_devices)
         self._gadgets["consumer"] = None
