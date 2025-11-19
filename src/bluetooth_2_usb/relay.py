@@ -664,6 +664,13 @@ class DeviceRelay:
 
             active = self._relaying_active and self._relaying_active.is_set()
 
+            # Debug logging for Windows troubleshooting
+            if isinstance(event, KeyEvent) and not active:
+                _logger.warning(
+                    f"Keyboard event blocked - relaying_active is not set. "
+                    f"Event: {event}, Device: {self._input_device.name}"
+                )
+
             # Dynamically grab/ungrab if relaying state changes
             if self._grab_device and active and not self._currently_grabbed:
                 try:
@@ -934,35 +941,55 @@ class UdcStateMonitor:
 
     def _handle_state_change(self, new_state: str):
         """
-        Handle a change in the UDC state. Releases all keys/buttons when state changes
-        to prevent stuck keys on sleep/wake cycles.
+        Handle a change in the UDC state. Manages state transitions and re-initializes
+        gadgets when recovering from sleep/disconnect.
 
         :param new_state: The new UDC state
         """
         prev_state = self._last_state
+        _logger.info(f"UDC state transition: '{prev_state}' → '{new_state}'")
 
-        # Only log state changes at info level if the state actually changed
-        if prev_state != new_state:
-            _logger.info(f"UDC state transition: '{prev_state}' → '{new_state}'")
+        # Detect if we're transitioning TO a connected state (wake/reconnect)
+        transitioning_to_configured = (
+            new_state == "configured" and prev_state not in ("configured", None)
+        )
 
-            # Release all keys and buttons on any state change to prevent stuck keys
+        # Detect if we're transitioning FROM a connected state (sleep/disconnect)
+        transitioning_from_configured = (
+            prev_state == "configured" and new_state != "configured"
+        )
+
+        # Handle transition FROM configured (going to sleep/disconnect)
+        if transitioning_from_configured:
+            _logger.info("USB host disconnecting or entering sleep - releasing all keys")
             keyboard = self._gadget_manager.get_keyboard()
             mouse = self._gadget_manager.get_mouse()
 
+            # Release all keys and buttons to prevent them getting stuck
             if keyboard:
                 keyboard.release_all()
             if mouse:
                 mouse.release_all()
 
-            _logger.debug("Released all keys/buttons due to UDC state change")
+        # Handle transition TO configured (waking up/reconnecting)
+        if transitioning_to_configured:
+            _logger.info("USB host reconnecting or waking from sleep - re-initializing gadgets")
+            try:
+                # Re-initialize gadgets to ensure clean state after sleep/wake
+                self._gadget_manager.enable_gadgets()
+                _logger.info("USB HID gadgets successfully re-initialized")
+            except Exception as ex:
+                _logger.error(f"Failed to re-initialize gadgets: {ex}")
 
         # Update connection and relay state based on new state
         if new_state == "configured":
             self._udc_connected.set()
             self._relaying_active.set()
+            _logger.info("UdcStateMonitor: Set relaying_active=True and udc_connected=True")
         else:
             self._udc_connected.clear()
             self._relaying_active.clear()
+            _logger.info("UdcStateMonitor: Set relaying_active=False and udc_connected=False")
 
 
 class UdevEventMonitor:
