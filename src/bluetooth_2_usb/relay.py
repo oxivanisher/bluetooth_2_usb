@@ -62,6 +62,11 @@ class GadgetManager:
         self._gadgets["consumer"] = ConsumerControl(enabled_devices)
         self._enabled = True
 
+        # Send initial "all released" reports to help Windows recognize the devices
+        _logger.debug("Sending initial HID reports to host...")
+        self._gadgets["keyboard"].release_all()
+        self._gadgets["mouse"].release_all()
+
         _logger.debug(f"USB HID gadgets initialized: {enabled_devices}")
 
     def get_keyboard(self) -> Optional[Keyboard]:
