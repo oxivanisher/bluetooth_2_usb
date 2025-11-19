@@ -919,6 +919,23 @@ class UdcStateMonitor:
         return False
 
     async def _poll_state(self):
+        # Initialize state on first check
+        initial_state = self._read_udc_state()
+        _logger.info(f"UdcStateMonitor: Initial UDC state is '{initial_state}'")
+
+        # Set initial relaying state based on initial UDC state
+        if initial_state == "configured":
+            self._udc_connected.set()
+            self._relaying_active.set()
+            _logger.info("UdcStateMonitor: Initially set relaying_active=True (UDC already configured)")
+        else:
+            self._udc_connected.clear()
+            self._relaying_active.clear()
+            _logger.info("UdcStateMonitor: Initially set relaying_active=False (UDC not configured)")
+
+        self._last_state = initial_state
+
+        # Monitor for state changes
         while not self._stop:
             new_state = self._read_udc_state()
             if new_state != self._last_state:
