@@ -54,9 +54,9 @@ class GadgetManager:
             _logger.debug("USB HID gadgets already enabled, skipping re-initialization")
             return
 
-        # Use regular (non-boot) devices with different report_ids to avoid conflicts
-        # MOUSE (report_id=2), KEYBOARD (report_id=1), CONSUMER_CONTROL (report_id=3)
-        usb_hid.enable([Device.MOUSE, Device.KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
+        # Windows requires boot protocol - both devices share report_id=0 but have different usage values
+        # BOOT_MOUSE (usage=0x02), BOOT_KEYBOARD (usage=0x06)
+        usb_hid.enable([Device.BOOT_MOUSE, Device.BOOT_KEYBOARD])  # type: ignore
         enabled_devices = list(usb_hid.devices)  # type: ignore
 
         _logger.info(f"Enabled devices: {enabled_devices}")
@@ -67,7 +67,8 @@ class GadgetManager:
 
         _logger.info(f"Keyboard gadget device: {self._gadgets['keyboard']._keyboard_device if hasattr(self._gadgets['keyboard'], '_keyboard_device') else 'unknown'}")
         _logger.info(f"Mouse gadget device: {self._gadgets['mouse']._mouse_device if hasattr(self._gadgets['mouse'], '_mouse_device') else 'unknown'}")
-        self._gadgets["consumer"] = ConsumerControl(enabled_devices)
+        # Skip consumer control - not needed and may interfere
+        self._gadgets["consumer"] = None
         self._enabled = True
 
         # Send initial HID reports to help Windows recognize and enumerate the devices
