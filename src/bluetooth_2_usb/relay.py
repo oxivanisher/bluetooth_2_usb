@@ -54,9 +54,10 @@ class GadgetManager:
             _logger.debug("USB HID gadgets already enabled, skipping re-initialization")
             return
 
-        # Original config: different report_ids avoid conflicts
-        # BOOT_MOUSE (report_id=0), KEYBOARD (report_id=1), CONSUMER_CONTROL (report_id=3)
-        usb_hid.enable([Device.BOOT_MOUSE, Device.KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
+        # Windows needs BOOT_KEYBOARD protocol for compatibility
+        # BOOT_MOUSE (report_id=0), BOOT_KEYBOARD (report_id=0), CONSUMER_CONTROL (report_id=3)
+        # Note: Both boot devices have report_id=0, but have different usage values so find_device works
+        usb_hid.enable([Device.BOOT_MOUSE, Device.BOOT_KEYBOARD, Device.CONSUMER_CONTROL])  # type: ignore
         enabled_devices = list(usb_hid.devices)  # type: ignore
 
         _logger.info(f"Enabled devices: {enabled_devices}")
