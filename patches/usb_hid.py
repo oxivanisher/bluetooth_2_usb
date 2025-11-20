@@ -377,6 +377,7 @@ Device.BOOT_KEYBOARD = Device(
             0x05, 0x01,  # usage page (generic desktop ctrls)
             0x09, 0x06,  # usage (keyboard)
             0xA1, 0x01,  # collection (application)
+            0x85, 0x01,  # Report ID (1)
             0x05, 0x07,  # usage page (kbrd/keypad)
             0x19, 0xE0,  # usage minimum (0xe0)
             0x29, 0xE7,  # usage maximum (0xe7)

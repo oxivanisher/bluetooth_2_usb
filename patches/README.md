@@ -11,10 +11,11 @@ Both `Device.BOOT_KEYBOARD` and `Device.BOOT_MOUSE` in the quax-circuitpython-hi
 4. Only one device works at a time
 
 ### Solution
-Changed `Device.BOOT_KEYBOARD` to use `report_ids=[0x1]` instead of `report_ids=[0x0]`. This ensures:
-- BOOT_MOUSE gets `/dev/hidg0` (report_id=0)
-- BOOT_KEYBOARD gets `/dev/hidg1` (report_id=1)
+Changed `Device.BOOT_KEYBOARD` to use `report_ids=[0x1]` instead of `report_ids=[0x0]`, and added Report ID declaration to the HID descriptor. This ensures:
+- BOOT_MOUSE gets `/dev/hidg0` (report_id=0, no report ID in descriptor)
+- BOOT_KEYBOARD gets `/dev/hidg1` (report_id=1, with report ID in descriptor)
 - Both devices can work simultaneously
+- HID report format matches the descriptor (fixes modifier keys)
 
 ### How to Apply
 Run the install script from the project root:
