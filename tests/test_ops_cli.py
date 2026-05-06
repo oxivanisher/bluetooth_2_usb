@@ -66,6 +66,12 @@ class OpsCliTest(unittest.TestCase):
         self.assertIn("--repo-root REPO_ROOT", stdout.getvalue())
         self.assertIn("udev/70-bluetooth_2_usb_hidapi.rules", stdout.getvalue())
 
+    def test_device_capture_routes_through_operational_cli(self) -> None:
+        with patch("bluetooth_2_usb.ops.devices.run", return_value=23) as capture:
+            self.assertEqual(cli.main(["device", "capture", "--device", "/dev/input/event1"]), 23)
+
+        capture.assert_called_once_with(["capture", "--device", "/dev/input/event1"])
+
     def test_smoketest_json_output_prints_structured_result(self) -> None:
         class FakeSmokeTest:
             def __init__(self, *, verbose: bool, allow_non_pi: bool) -> None:

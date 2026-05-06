@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from .. import boot_config
+from ..artifacts import make_user_copyable
 from ..bluetooth import rfkill_list_bluetooth
 from ..commands import OpsError, ok, output, run, timestamp
 from ..paths import PATHS
@@ -158,6 +159,7 @@ def debug_report(duration: int | None) -> int:
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     header = f"# bluetooth_2_usb debug report\n\n_Generated: {generated_at}_\n\n"
     report_file.write_text(header + "\n".join(body), encoding="utf-8")
+    make_user_copyable(report_file)
     ok(f"Wrote: {report_file}")
     return 0
 

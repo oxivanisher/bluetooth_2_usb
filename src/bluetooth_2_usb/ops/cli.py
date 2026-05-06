@@ -13,7 +13,7 @@ from .hid_udev_rule import install_hid_udev_rule
 from .paths import PATHS
 from .readonly import disable_readonly, enable_readonly, print_readonly_status, setup_persistent_bluetooth_state
 
-OPERATIONAL_COMMANDS = frozenset({"install", "update", "uninstall", "smoketest", "debug", "readonly", "udev"})
+OPERATIONAL_COMMANDS = frozenset({"install", "update", "uninstall", "smoketest", "debug", "readonly", "udev", "device"})
 
 
 def run() -> None:
@@ -32,6 +32,11 @@ def main(argv: list[str] | None = None, *, prog: str = "bluetooth_2_usb") -> int
 
 
 def _main(argv: list[str], *, prog: str) -> int:
+    if argv[:1] == ["device"]:
+        from .devices import run as device_run
+
+        return device_run(argv[1:])
+
     parser = argparse.ArgumentParser(prog=prog)
     subparsers = parser.add_subparsers(dest="command", required=True)
 

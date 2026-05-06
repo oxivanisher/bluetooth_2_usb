@@ -176,7 +176,8 @@ def run(argv: list[str] | None = None) -> int:
     if raw_args[:1] and not raw_args[0].startswith("-"):
         print(
             f"Unknown command: {raw_args[0]}. "
-            + "Use bluetooth_2_usb loopback inject/capture for loopback validation.",
+            + "Use bluetooth_2_usb loopback inject/capture for loopback validation "
+            + "or bluetooth_2_usb device capture for source-device captures.",
             file=sys.stderr,
         )
         return EXIT_USAGE

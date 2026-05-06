@@ -19,22 +19,40 @@ To retrieve the latest redacted debug report from a Pi after running `debug`:
 
 > [!NOTE]
 > Change `PI_USER` and `PI_HOST` if your Pi uses a different SSH user or
-> hostname.
+> hostname. Keep the `.local` suffix when mDNS works; otherwise use the Pi's
+> IP address or another resolvable hostname.
 
 ```bash
 PI_USER=pi
 PI_HOST=raspberrypi.local
 PI_SSH="${PI_USER}@${PI_HOST}"
-DEBUG_REPORT_MD=bluetooth_2_usb-debug-latest.md
 
-ssh -t "${PI_SSH}" "sudo sh -c 'latest=\$(ls -t /var/log/bluetooth_2_usb/debug_*.md 2>/dev/null | head -n 1); test -n \"\$latest\" && cp \"\$latest\" \"/tmp/${DEBUG_REPORT_MD}\" && chmod 0644 \"/tmp/${DEBUG_REPORT_MD}\" && chown \"\$SUDO_UID:\$SUDO_GID\" \"/tmp/${DEBUG_REPORT_MD}\"'" \
-  && scp "${PI_SSH}:/tmp/${DEBUG_REPORT_MD}" "./${DEBUG_REPORT_MD}" \
-  && ssh "${PI_SSH}" "rm -f /tmp/${DEBUG_REPORT_MD}"
+ssh "${PI_SSH}" 'sudo bluetooth_2_usb debug --duration 10'
+DEBUG_REPORT=$(ssh "${PI_SSH}" 'ls -t /var/log/bluetooth_2_usb/debug_*.md | head -n 1')
+scp "${PI_SSH}:${DEBUG_REPORT}" ./bluetooth_2_usb-debug-latest.md
 ```
 
 If the problem involves pairing, relay behavior, suspend/wake, service startup,
 or read-only mode, also mention what changed recently and whether the Pi is
 connected to the target host through the OTG-capable data port.
+
+For new-device support requests, also include a local capture from the real
+device when possible. See [docs/device-capture.md](docs/device-capture.md).
+
+```bash
+sudo bluetooth_2_usb device capture --device /dev/input/eventX --duration 30 --grab
+```
+
+Use raw live mode only when a maintainer asks for every event and report:
+
+```bash
+sudo bluetooth_2_usb device capture --device /dev/input/eventX --duration 30 --grab --live-mode raw
+```
+
+The generated JSONL artifact may include typed keys, button presses, raw report
+bytes, MAC addresses, and unique device IDs. The default summarized mode is
+preferred for new-device support because it keeps compact per-axis snapshots
+and report summaries. Review captures before sharing them publicly.
 
 ## Pull Requests
 

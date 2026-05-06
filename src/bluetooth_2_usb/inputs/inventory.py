@@ -69,7 +69,7 @@ def auto_discover_exclusion_reason(
         return f"failed to read capabilities ({exc})"
 
     if not any(code in capabilities for code in EVENT_TYPE_NAMES):
-        return "missing EV_KEY/EV_REL capabilities"
+        return "missing supported relay capabilities"
 
     return None
 

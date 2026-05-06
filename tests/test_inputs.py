@@ -65,6 +65,11 @@ class InputInventoryTest(unittest.TestCase):
 
         self.assertEqual(auto_discover_exclusion_reason(device), "name prefix gpio")
 
+    def test_auto_discover_exclusion_reason_uses_general_supported_capabilities_wording(self) -> None:
+        device = _FakeInputDevice(path="/dev/input/event0", name="Sensor", capabilities={})
+
+        self.assertEqual(auto_discover_exclusion_reason(device), "missing supported relay capabilities")
+
     def test_describe_input_devices_reports_mixed_candidates_and_closes_devices(self) -> None:
         keyboard = _FakeInputDevice(
             path="/dev/input/event1", name="Keyboard", phys="usb-1", uniq="AA-BB", capabilities={ecodes.EV_KEY: []}

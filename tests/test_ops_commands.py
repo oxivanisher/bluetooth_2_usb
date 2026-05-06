@@ -1,9 +1,12 @@
 import io
 import subprocess
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
+from bluetooth_2_usb.ops.artifacts import make_user_copyable
 from bluetooth_2_usb.ops.commands import OpsError, fail_final, info, ok, ok_final, run, warn, warn_fail
 
 
@@ -59,6 +62,31 @@ class OpsCommandsTest(unittest.TestCase):
                 info("hello")
 
         self.assertEqual(stdout.getvalue(), "[i] hello\n")
+
+    def test_make_user_copyable_chowns_sudo_user(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "artifact.md"
+            path.write_text("payload", encoding="utf-8")
+
+            with patch.dict("os.environ", {"SUDO_UID": "123", "SUDO_GID": "456"}):
+                with patch("bluetooth_2_usb.ops.artifacts.os.chown") as chown:
+                    make_user_copyable(path)
+
+            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+            chown.assert_called_once_with(path, 123, 456)
+
+    def test_make_user_copyable_warns_but_does_not_raise_when_chown_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "artifact.md"
+            path.write_text("payload", encoding="utf-8")
+            stdout = io.StringIO()
+
+            with patch.dict("os.environ", {"SUDO_UID": "123", "SUDO_GID": "456"}):
+                with patch("bluetooth_2_usb.ops.artifacts.os.chown", side_effect=PermissionError("denied")):
+                    with redirect_stdout(stdout):
+                        make_user_copyable(path)
+
+            self.assertIn("Could not chown", stdout.getvalue())
 
     def test_run_normalizes_missing_command(self) -> None:
         with patch("subprocess.run", side_effect=FileNotFoundError("missing")):
