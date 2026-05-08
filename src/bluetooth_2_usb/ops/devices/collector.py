@@ -129,51 +129,51 @@ async def capture_device(
             opened_hidraw_paths: set[Path] = set()
             recorded_hidraw_paths: set[Path] = set()
             hidraw_report_id_paths: set[Path] = set()
-            for handle in handles:
-                _write_static_records(writer, handle.device, max_sysfs_file_bytes)
+            try:
+                for handle in handles:
+                    _write_static_records(writer, handle.device, max_sysfs_file_bytes)
 
-                if grab:
-                    handle.device.grab()
-                    handle.grabbed = True
-                    writer.write(
-                        {
-                            "record_type": "capture_note",
-                            "path": getattr(handle.device, "path", ""),
-                            "message": "grabbed input device",
-                        },
-                        flush=True,
-                    )
-
-                if include_hidraw:
-                    handle.hidraw_nodes = linux.discover_hidraw_nodes(handle.device)
-                    nodes_to_record = [node for node in handle.hidraw_nodes if node not in recorded_hidraw_paths]
-                    if nodes_to_record:
-                        for record in linux.hidraw_node_records(nodes_to_record, max_sysfs_file_bytes):
-                            if _hidraw_node_uses_report_ids(record):
-                                hidraw_report_id_paths.add(Path(str(record.get("path", ""))))
-                            writer.write(record, flush=True)
-                    recorded_hidraw_paths.update(nodes_to_record)
-
-                    nodes_to_open = [node for node in handle.hidraw_nodes if node not in opened_hidraw_paths]
-                    if nodes_to_open:
-                        handle.opened_hidraw, warnings = linux.open_hidraw_nodes(nodes_to_open)
-                        opened_hidraw_paths.update(nodes_to_open)
-                    else:
-                        warnings = []
-                    for warning in warnings:
-                        writer.write(warning, flush=True)
-                    if not handle.hidraw_nodes:
+                    if grab:
+                        handle.device.grab()
+                        handle.grabbed = True
                         writer.write(
                             {
-                                "record_type": "capture_warning",
-                                "source": "hidraw",
+                                "record_type": "capture_note",
                                 "path": getattr(handle.device, "path", ""),
-                                "message": "no matching hidraw node discovered",
+                                "message": "grabbed input device",
                             },
                             flush=True,
                         )
 
-            try:
+                    if include_hidraw:
+                        handle.hidraw_nodes = linux.discover_hidraw_nodes(handle.device)
+                        nodes_to_record = [node for node in handle.hidraw_nodes if node not in recorded_hidraw_paths]
+                        if nodes_to_record:
+                            for record in linux.hidraw_node_records(nodes_to_record, max_sysfs_file_bytes):
+                                if _hidraw_node_uses_report_ids(record):
+                                    hidraw_report_id_paths.add(Path(str(record.get("path", ""))))
+                                writer.write(record, flush=True)
+                        recorded_hidraw_paths.update(nodes_to_record)
+
+                        nodes_to_open = [node for node in handle.hidraw_nodes if node not in opened_hidraw_paths]
+                        if nodes_to_open:
+                            handle.opened_hidraw, warnings = linux.open_hidraw_nodes(nodes_to_open)
+                            opened_hidraw_paths.update(nodes_to_open)
+                        else:
+                            warnings = []
+                        for warning in warnings:
+                            writer.write(warning, flush=True)
+                        if not handle.hidraw_nodes:
+                            writer.write(
+                                {
+                                    "record_type": "capture_warning",
+                                    "source": "hidraw",
+                                    "path": getattr(handle.device, "path", ""),
+                                    "message": "no matching hidraw node discovered",
+                                },
+                                flush=True,
+                            )
+
                 await asyncio.gather(
                     *(
                         _capture_live_records(

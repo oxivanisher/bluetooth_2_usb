@@ -338,6 +338,7 @@ def migrate_bluetooth_state_to_rootfs() -> None:
     target = Path("/var/lib/bluetooth")
     temp_dir = target.with_name(f"{target.name}.b2u-migrate-{uuid.uuid4().hex}")
     backup_dir = target.with_name(f"{target.name}.b2u-backup-{uuid.uuid4().hex}")
+    cleanup_error: OpsError | None = None
     try:
         if bluetooth_was_active:
             run(["systemctl", "stop", "bluetooth.service"])
@@ -359,15 +360,23 @@ def migrate_bluetooth_state_to_rootfs() -> None:
             shutil.rmtree(backup_dir, ignore_errors=True)
         remove_bluetooth_persist_dropin()
         remove_bluetooth_bind_mount_unit()
-        _disable_persistent_storage_mount(config)
-        run(["systemctl", "daemon-reload"])
+        try:
+            _disable_persistent_storage_mount(config)
+        except OpsError as exc:
+            cleanup_error = exc
+        finally:
+            run(["systemctl", "daemon-reload"], check=False)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
         if bluetooth_was_active and not _systemctl_active("bluetooth.service"):
             run(["systemctl", "start", "bluetooth.service"], check=False)
         restart_b2u_if_installed(b2u_was_active, "after migrating Bluetooth state back to rootfs")
     ok("Bluetooth state has been migrated back to /var/lib/bluetooth on the root filesystem.")
-    ok("Persistent storage mount has been disabled and unmounted.")
+    if cleanup_error is None:
+        ok("Persistent storage mount has been disabled and unmounted.")
+    else:
+        warn(f"Persistent storage mount cleanup failed: {cleanup_error}")
+        warn(f"Manual cleanup may be required for {config.persist_mount}.")
     warn("Data on the persistent device was left intact.")
 
 

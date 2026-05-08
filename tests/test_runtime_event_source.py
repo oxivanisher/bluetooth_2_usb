@@ -142,6 +142,17 @@ class RuntimeEventSourceTest(unittest.IsolatedAsyncioTestCase):
 
         monitor.close()
 
+    async def test_runtime_event_source_ignores_udc_enumeration_errors(self) -> None:
+        class UnreadableUdcRoot:
+            def is_dir(self) -> bool:
+                return True
+
+            def iterdir(self):
+                raise PermissionError("denied")
+
+        with patch("bluetooth_2_usb.runtime.event_source.Path", return_value=UnreadableUdcRoot()):
+            self.assertIsNone(_discover_udc_state_path())
+
     async def test_runtime_event_source_stops_when_start_monitoring_fails(self) -> None:
         queue = asyncio.Queue()
         monitor = _FakeMonitor()

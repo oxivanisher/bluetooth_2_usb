@@ -216,6 +216,8 @@ def close_hidraw_nodes(opened: list[tuple[Path, int]]) -> None:
 
 
 def read_hidraw(fd: int, max_bytes: int) -> bytes | None:
+    if max_bytes < 0:
+        raise ValueError("max_bytes must be >= 0")
     try:
         return os.read(fd, max_bytes + 1)
     except BlockingIOError:
@@ -238,6 +240,8 @@ def read_bounded_text(path: Path, max_bytes: int) -> BoundedRead:
 
 
 def read_bounded_bytes(path: Path, max_bytes: int) -> BoundedRead:
+    if max_bytes < 0:
+        return BoundedRead(path=str(path), error="max_bytes must be >= 0")
     try:
         with path.open("rb") as handle:
             data = handle.read(max_bytes + 1)

@@ -115,6 +115,19 @@ class ServiceSettingsTest(unittest.TestCase):
         self.assertEqual(settings.devices, ["keyboard", "mouse"])
         self.assertEqual(migrated_text, "B2U_DEVICES='keyboard, mouse'\n")
 
+    def test_normalize_service_settings_uses_later_non_empty_legacy_device_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = Path(tmpdir) / "bluetooth_2_usb"
+            env_file.write_text("B2U_DEVICE_IDS=\nB2U_DEVICE_IDS='keyboard, mouse'\n", encoding="utf-8")
+
+            changed = normalize_service_settings_file(env_file)
+            settings = load_service_settings(env_file)
+            migrated_text = env_file.read_text(encoding="utf-8")
+
+        self.assertTrue(changed)
+        self.assertEqual(settings.devices, ["keyboard", "mouse"])
+        self.assertEqual(migrated_text, "B2U_DEVICES='keyboard, mouse'\n")
+
     def test_normalize_service_settings_renames_old_auto_and_shortcut_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             env_file = Path(tmpdir) / "bluetooth_2_usb"

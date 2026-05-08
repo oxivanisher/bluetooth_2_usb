@@ -215,8 +215,10 @@ def normalize_service_settings_file(env_file: Path = DEFAULT_ENV_FILE) -> bool:
         changed = True
         target_key = key_migrations[key]
         if target_key not in non_empty_targets:
-            updated_lines.append(line.replace(key, target_key, 1))
-            non_empty_targets.add(target_key)
+            migrated_line = line.replace(key, target_key, 1)
+            if not _line_value_is_blank(migrated_line):
+                updated_lines.append(migrated_line)
+                non_empty_targets.add(target_key)
 
     if not changed:
         return False

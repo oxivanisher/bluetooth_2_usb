@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import select
 import signal
 import subprocess
+import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
+
+from rich.console import Console
 
 from .. import boot_config
 from ..artifacts import make_user_copyable
@@ -22,6 +27,12 @@ from ..readonly import (
 from .redaction import redact
 
 DEBUG_COMMAND_TIMEOUT_SECONDS = 20
+
+
+@contextmanager
+def _status(message: str):
+    with Console(file=sys.stdout).status(message, spinner="dots"):
+        yield
 
 
 def debug_report(duration: int | None) -> int:
@@ -45,32 +56,34 @@ def debug_report(duration: int | None) -> int:
 
     def command_block(title: str, command: list[str | Path]) -> None:
         heading(title)
-        try:
-            completed = run(command, check=False, capture=True, timeout=DEBUG_COMMAND_TIMEOUT_SECONDS)
-            text = completed.stdout + completed.stderr
-            suffix = "" if completed.returncode == 0 else f"\n[command exited with status {completed.returncode}]"
-        except (OSError, OpsError) as exc:
-            text = str(exc)
-            suffix = (
-                f"\n[timed out after {DEBUG_COMMAND_TIMEOUT_SECONDS}s]"
-                if "timed out after" in text
-                else "\n[command failed]"
-            )
-        except subprocess.TimeoutExpired as exc:
-            text = ((exc.stdout or "") + (exc.stderr or "")) if isinstance(exc.stdout, str) else ""
-            suffix = f"\n[timed out after {DEBUG_COMMAND_TIMEOUT_SECONDS}s]"
+        with _status(f"Collecting {title}"):
+            try:
+                completed = run(command, check=False, capture=True, timeout=DEBUG_COMMAND_TIMEOUT_SECONDS)
+                text = completed.stdout + completed.stderr
+                suffix = "" if completed.returncode == 0 else f"\n[command exited with status {completed.returncode}]"
+            except (OSError, OpsError) as exc:
+                text = str(exc)
+                suffix = (
+                    f"\n[timed out after {DEBUG_COMMAND_TIMEOUT_SECONDS}s]"
+                    if "timed out after" in text
+                    else "\n[command failed]"
+                )
+            except subprocess.TimeoutExpired as exc:
+                text = ((exc.stdout or "") + (exc.stderr or "")) if isinstance(exc.stdout, str) else ""
+                suffix = f"\n[timed out after {DEBUG_COMMAND_TIMEOUT_SECONDS}s]"
         body.append("```console\n" + redact((text or "<no output>") + suffix, hostname) + "\n```\n")
 
     try:
-        initial_service_state = (
-            run(
-                ["systemctl", "is-active", PATHS.service_unit],
-                check=False,
-                capture=True,
-                timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
-            ).stdout.strip()
-            or "unknown"
-        )
+        with _status("Checking service state"):
+            initial_service_state = (
+                run(
+                    ["systemctl", "is-active", PATHS.service_unit],
+                    check=False,
+                    capture=True,
+                    timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
+                ).stdout.strip()
+                or "unknown"
+            )
     except (OpsError, OSError):
         initial_service_state = "unknown"
 
@@ -147,21 +160,22 @@ def debug_report(duration: int | None) -> int:
         command_block(
             "Device inventory (json)", [PATHS.venv_python, "-m", "bluetooth_2_usb", "--list", "--output", "json"]
         )
-        try:
-            debug_command = run(
-                [
-                    PATHS.venv_python,
-                    "-m",
-                    "bluetooth_2_usb.service_settings",
-                    "--print-shell-command",
-                    "--append-debug",
-                ],
-                check=False,
-                capture=True,
-                timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
-            ).stdout.strip()
-        except (OSError, OpsError, subprocess.TimeoutExpired):
-            debug_command = ""
+        with _status("Preparing live debug command"):
+            try:
+                debug_command = run(
+                    [
+                        PATHS.venv_python,
+                        "-m",
+                        "bluetooth_2_usb.service_settings",
+                        "--print-shell-command",
+                        "--append-debug",
+                    ],
+                    check=False,
+                    capture=True,
+                    timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
+                ).stdout.strip()
+            except (OSError, OpsError, subprocess.TimeoutExpired):
+                debug_command = ""
         text_block(
             "Live debug setup",
             f"live_debug_duration={duration if duration else 'until interrupted'}\n"
@@ -204,19 +218,23 @@ def _run_live_debug(command: str, duration: int | None, hostname: str) -> str:
     debug_output = ""
     try:
         timeout = duration
-        with tempfile.TemporaryFile("w+t", encoding="utf-8") as output_file:
+        with tempfile.TemporaryFile("w+b") as output_file:
             process = subprocess.Popen(
                 ["setsid", "bash", "--noprofile", "--norc", "-c", command],
-                stdout=output_file,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                text=True,
             )
             try:
-                process.wait(timeout=timeout)
+                _tee_process_output(process, output_file, timeout, hostname)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 _terminate_process_group(process)
+                _drain_process_output(process, output_file, hostname)
+            finally:
+                process_stdout = getattr(process, "stdout", None)
+                if process_stdout is not None:
+                    process_stdout.close()
             output_file.seek(0)
-            debug_output = output_file.read()
+            debug_output = output_file.read().decode("utf-8", errors="replace")
     finally:
         if stopped_service:
             start = run(
@@ -232,6 +250,50 @@ def _run_live_debug(command: str, duration: int | None, hostname: str) -> str:
                     + "]"
                 )
     return redact(debug_output, hostname) or "<no output>"
+
+
+def _tee_process_output(process: subprocess.Popen[bytes], output_file, timeout: int | None, hostname: str) -> None:
+    process_stdout = getattr(process, "stdout", None)
+    if process_stdout is None:
+        process.wait(timeout=timeout)
+        return
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    while True:
+        if deadline is None:
+            select_timeout = 0.2
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            select_timeout = min(0.2, remaining)
+        readable, _, _ = select.select([process_stdout], [], [], select_timeout)
+        if readable:
+            chunk = os.read(process_stdout.fileno(), 4096)
+            if chunk:
+                output_file.write(chunk)
+                output_file.flush()
+                sys.stdout.write(redact(chunk.decode("utf-8", errors="replace"), hostname))
+                sys.stdout.flush()
+        if process.poll() is not None:
+            _drain_process_output(process, output_file, hostname)
+            return
+
+
+def _drain_process_output(process: subprocess.Popen[bytes], output_file, hostname: str) -> None:
+    process_stdout = getattr(process, "stdout", None)
+    if process_stdout is None:
+        return
+    while True:
+        readable, _, _ = select.select([process_stdout], [], [], 0)
+        if not readable:
+            return
+        chunk = os.read(process_stdout.fileno(), 4096)
+        if not chunk:
+            return
+        output_file.write(chunk)
+        output_file.flush()
+        sys.stdout.write(redact(chunk.decode("utf-8", errors="replace"), hostname))
+        sys.stdout.flush()
 
 
 def _terminate_process_group(process: subprocess.Popen) -> None:

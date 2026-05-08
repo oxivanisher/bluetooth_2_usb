@@ -50,6 +50,7 @@ class HidDeviceInfo:
     name: str
     manufacturer: str
     serial: str
+    physical_path: str
     vendor_id: int
     product_id: int
     interface_number: int
@@ -62,7 +63,7 @@ class HidDeviceInfo:
 
     @property
     def phys(self) -> str:
-        return ""
+        return self.physical_path
 
     @property
     def uniq(self) -> str:
@@ -566,13 +567,15 @@ def _iter_hid_infos(hid_module: Any) -> list[HidDeviceInfo]:
         raw_path = entry.get("path")
         if raw_path is None:
             continue
+        node = _render_hidapi_path(raw_path)
         infos.append(
             HidDeviceInfo(
-                node=_render_hidapi_path(raw_path),
+                node=node,
                 raw_path=raw_path,
                 name=entry.get("product_string") or "",
                 manufacturer=entry.get("manufacturer_string") or "",
                 serial=entry.get("serial_number") or "",
+                physical_path=_render_hidapi_path(entry.get("phys") or entry.get("physical_path") or node),
                 vendor_id=int(entry.get("vendor_id") or 0),
                 product_id=int(entry.get("product_id") or 0),
                 interface_number=int(entry.get("interface_number") or 0),
