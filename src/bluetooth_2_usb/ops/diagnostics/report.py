@@ -216,6 +216,11 @@ def _run_live_debug(command: str, duration: int | None, hostname: str) -> str:
                 _tee_process_output(process, output_file, timeout, hostname)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 _terminate_process_group(process)
+                _drain_process_output(process, output_file, hostname)
+            finally:
+                process_stdout = getattr(process, "stdout", None)
+                if process_stdout is not None:
+                    process_stdout.close()
             output_file.seek(0)
             debug_output = output_file.read().decode("utf-8", errors="replace")
     finally:
@@ -236,42 +241,41 @@ def _run_live_debug(command: str, duration: int | None, hostname: str) -> str:
 
 
 def _tee_process_output(process: subprocess.Popen[bytes], output_file, timeout: int | None, hostname: str) -> None:
-    if process.stdout is None:
+    process_stdout = getattr(process, "stdout", None)
+    if process_stdout is None:
         process.wait(timeout=timeout)
         return
     deadline = time.monotonic() + timeout if timeout is not None else None
-    try:
-        while True:
-            if deadline is None:
-                select_timeout = 0.2
-            else:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise subprocess.TimeoutExpired(process.args, timeout)
-                select_timeout = min(0.2, remaining)
-            readable, _, _ = select.select([process.stdout], [], [], select_timeout)
-            if readable:
-                chunk = os.read(process.stdout.fileno(), 4096)
-                if chunk:
-                    output_file.write(chunk)
-                    output_file.flush()
-                    sys.stdout.write(redact(chunk.decode("utf-8", errors="replace"), hostname))
-                    sys.stdout.flush()
-            if process.poll() is not None:
-                _drain_process_output(process, output_file, hostname)
-                return
-    finally:
-        process.stdout.close()
+    while True:
+        if deadline is None:
+            select_timeout = 0.2
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            select_timeout = min(0.2, remaining)
+        readable, _, _ = select.select([process_stdout], [], [], select_timeout)
+        if readable:
+            chunk = os.read(process_stdout.fileno(), 4096)
+            if chunk:
+                output_file.write(chunk)
+                output_file.flush()
+                sys.stdout.write(redact(chunk.decode("utf-8", errors="replace"), hostname))
+                sys.stdout.flush()
+        if process.poll() is not None:
+            _drain_process_output(process, output_file, hostname)
+            return
 
 
 def _drain_process_output(process: subprocess.Popen[bytes], output_file, hostname: str) -> None:
-    if process.stdout is None:
+    process_stdout = getattr(process, "stdout", None)
+    if process_stdout is None:
         return
     while True:
-        readable, _, _ = select.select([process.stdout], [], [], 0)
+        readable, _, _ = select.select([process_stdout], [], [], 0)
         if not readable:
             return
-        chunk = os.read(process.stdout.fileno(), 4096)
+        chunk = os.read(process_stdout.fileno(), 4096)
         if not chunk:
             return
         output_file.write(chunk)

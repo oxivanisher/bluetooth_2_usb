@@ -673,10 +673,27 @@ class OpsDiagnosticsTest(unittest.TestCase):
         )
         stdout = StringIO()
         with tempfile.TemporaryFile("w+b") as output_file, redirect_stdout(stdout):
-            diagnostics_report._tee_process_output(process, output_file, 2, "test-host")
-            output_file.seek(0)
-            captured = output_file.read().decode("utf-8", errors="replace")
+            try:
+                diagnostics_report._tee_process_output(process, output_file, 2, "test-host")
+                output_file.seek(0)
+                captured = output_file.read().decode("utf-8", errors="replace")
+            finally:
+                if process.stdout is not None:
+                    process.stdout.close()
 
         self.assertEqual(process.returncode, 0)
         self.assertIn("hello test-host", captured)
         self.assertIn("hello <<REDACTED_HOSTNAME>>", stdout.getvalue())
+
+    def test_live_debug_drains_shutdown_output_after_timeout(self) -> None:
+        command = "trap 'printf shutdown-test-host\\\\n; exit 0' TERM; printf started-test-host\\\\n; while true; do sleep 1; done"
+        with patch(f"{DIAGNOSTICS_REPORT}.run") as run_mock:
+            run_mock.return_value.returncode = 1
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                output = diagnostics_report._run_live_debug(command, 1, "test-host")
+
+        self.assertIn("started-<<REDACTED_HOSTNAME>>", stdout.getvalue())
+        self.assertIn("shutdown-<<REDACTED_HOSTNAME>>", stdout.getvalue())
+        self.assertIn("started-<<REDACTED_HOSTNAME>>", output)
+        self.assertIn("shutdown-<<REDACTED_HOSTNAME>>", output)
