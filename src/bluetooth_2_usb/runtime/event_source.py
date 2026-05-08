@@ -125,7 +125,11 @@ def _discover_udc_state_path() -> Path | None:
     if not udc_root.is_dir():
         return None
 
-    controllers = sorted(entry for entry in udc_root.iterdir() if entry.is_dir())
+    try:
+        controllers = sorted(entry for entry in udc_root.iterdir() if entry.is_dir())
+    except OSError:
+        logger.debug("Unable to enumerate UDC controllers in %s", udc_root, exc_info=True)
+        return None
     if not controllers:
         return None
 

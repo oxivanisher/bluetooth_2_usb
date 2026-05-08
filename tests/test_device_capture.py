@@ -16,6 +16,7 @@ from bluetooth_2_usb.ops.devices.linux import (
     DeviceSelectionError,
     _hidraw_device_node,
     read_bounded_bytes,
+    read_hidraw,
     select_input_device,
     select_input_devices,
 )
@@ -61,6 +62,11 @@ class _FakeInputDevice:
 
     def close(self):
         self.closed = True
+
+
+class _GrabFailingInputDevice(_FakeInputDevice):
+    def grab(self):
+        raise OSError("grab failed")
 
 
 class _FutureInputDevice(_FakeInputDevice):
@@ -384,6 +390,20 @@ class DeviceCaptureTest(unittest.TestCase):
         self.assertEqual(result.hex, "61 62 63")
         self.assertTrue(result.truncated)
 
+    def test_bounded_file_read_rejects_negative_limit(self) -> None:
+        result = read_bounded_bytes(Path("/tmp/descriptor"), -1)
+
+        self.assertEqual(result.error, "max_bytes must be >= 0")
+
+    def test_hidraw_read_rejects_negative_limit(self) -> None:
+        read_fd, write_fd = os.pipe()
+        os.close(write_fd)
+        try:
+            with self.assertRaisesRegex(ValueError, "max_bytes must be >= 0"):
+                read_hidraw(read_fd, -1)
+        finally:
+            os.close(read_fd)
+
     def test_hidraw_device_node_rejects_parent_hidraw_directory(self) -> None:
         self.assertIsNone(_hidraw_device_node(Path("/sys/devices/example/hidraw")))
         self.assertIsNone(_hidraw_device_node(Path("/sys/devices/example/hidrawfoo")))
@@ -419,6 +439,33 @@ class DeviceCaptureTest(unittest.TestCase):
         self.assertEqual(records[-1]["record_type"], "capture_end")
         self.assertEqual([record["record_type"] for record in records].count("evdev_event"), 0)
         self.assertEqual([record["record_type"] for record in records].count("evdev_key_snapshot"), 1)
+        self.assertFalse(records[-1]["interrupted"])
+
+    def test_capture_writes_end_record_when_grab_fails(self) -> None:
+        device = _GrabFailingInputDevice("/dev/input/event1", "Keyboard")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output = Path(tmpdir) / "capture.jsonl"
+            with (
+                patch("bluetooth_2_usb.ops.devices.linux.select_input_devices", return_value=[device]),
+                patch("bluetooth_2_usb.ops.devices.linux.discover_hidraw_nodes", return_value=[]),
+            ):
+                with self.assertRaisesRegex(OSError, "grab failed"):
+                    asyncio.run(
+                        collector.capture_device(
+                            devices="/dev/input/event1",
+                            duration_sec=1,
+                            output_path=output,
+                            grab=True,
+                            include_hidraw=False,
+                            max_report_bytes=8,
+                            max_sysfs_file_bytes=8,
+                        )
+                    )
+
+            records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+
+        self.assertTrue(device.closed)
+        self.assertEqual(records[-1]["record_type"], "capture_end")
         self.assertFalse(records[-1]["interrupted"])
 
     def test_capture_progress_receives_matched_devices(self) -> None:

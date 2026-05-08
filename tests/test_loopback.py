@@ -187,6 +187,7 @@ def _hid_entry(
     device_name: str = f"{USB_MANUFACTURER} {USB_PRODUCT_NAME}",
     manufacturer: str = USB_MANUFACTURER,
     serial: str = USB_SERIAL_NUMBER,
+    phys: str = "",
     vendor_id: int = 0,
     product_id: int = 0,
     interface_number: int = 0,
@@ -198,6 +199,7 @@ def _hid_entry(
         "product_string": device_name,
         "manufacturer_string": manufacturer,
         "serial_number": serial,
+        "phys": phys,
         "vendor_id": vendor_id,
         "product_id": product_id,
         "interface_number": interface_number,
@@ -450,6 +452,18 @@ class GadgetNodeDiscoveryTest(unittest.TestCase):
         self.assertEqual([info.node for info in candidates.keyboard_nodes], ["pi0w-kbd"])
         self.assertEqual([info.node for info in candidates.mouse_nodes], ["pi0w-mouse"])
         self.assertEqual([info.node for info in candidates.consumer_nodes], ["pi0w-consumer"])
+
+    def test_discovery_can_filter_gadgets_by_phys(self) -> None:
+        hid_module = _FakeHidModule(
+            [
+                _hid_entry("kbd-a", phys="usb-1/input0", usage_page=HID_PAGE_GENERIC_DESKTOP, usage=HID_USAGE_KEYBOARD),
+                _hid_entry("kbd-b", phys="usb-2/input0", usage_page=HID_PAGE_GENERIC_DESKTOP, usage=HID_USAGE_KEYBOARD),
+            ]
+        )
+
+        candidates = discover_gadget_node_candidates(devices="usb-1/input0", hid_module=hid_module)
+
+        self.assertEqual([info.node for info in candidates.keyboard_nodes], ["kbd-a"])
 
     def test_discovery_reports_missing_device_filter(self) -> None:
         hid_module = _FakeHidModule(
