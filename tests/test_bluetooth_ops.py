@@ -958,9 +958,18 @@ class ReadonlyConfigTest(unittest.TestCase):
                 stack.enter_context(patch(f"{READONLY_WORKFLOWS}.run", side_effect=fake_run))
                 stack.enter_context(patch(f"{READONLY_WORKFLOWS}.Path", side_effect=local_path))
 
-                with self.assertRaisesRegex(OpsError, "could not be unmounted"):
+                with redirect_stdout(StringIO()) as stdout:
                     migrate_bluetooth_state_to_rootfs()
 
+            output = stdout.getvalue()
             self.assertIn(["systemctl", "start", "bluetooth.service"], commands)
+            self.assertIn(["systemctl", "daemon-reload"], commands)
+            self.assertIn(
+                "Bluetooth state has been migrated back to /var/lib/bluetooth on the root filesystem.",
+                output,
+            )
+            self.assertIn("Persistent storage mount cleanup failed", output)
+            self.assertIn(str(config.persist_mount), output)
+            self.assertIn("Data on the persistent device was left intact.", output)
             remove_persist.assert_not_called()
             restart_b2u.assert_called_once_with(True, "after migrating Bluetooth state back to rootfs")
