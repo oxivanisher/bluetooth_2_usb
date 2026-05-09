@@ -1323,9 +1323,18 @@ class LoopbackInjectTest(unittest.TestCase):
         self.assertEqual(exit_code, EXIT_USAGE)
         self.assertIn("devices must not be empty", stdout.getvalue())
 
-    def test_discovery_rejects_malformed_device_filter_list_as_value_error(self) -> None:
-        with self.assertRaisesRegex(ValueError, "devices must not be empty"):
+    def test_discovery_rejects_malformed_device_filter_list_as_missing_node_error(self) -> None:
+        with self.assertRaisesRegex(MissingNodeError, "Invalid devices filter ','"):
             discover_gadget_node_candidates(devices=",", hid_module=_FakeHidModule([]))
+
+    def test_capture_reports_invalid_devices_as_structured_failure(self) -> None:
+        with patch("bluetooth_2_usb.loopback.capture._load_hidapi", return_value=_FakeHidModule([])):
+            result = run_capture(SCENARIO_KEYBOARD, devices=",")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.exit_code, EXIT_PREREQUISITE)
+        self.assertIn("Invalid devices filter ','", result.message)
+        self.assertEqual(result.details, {})
 
     def test_capture_uses_scenario_default_timeout(self) -> None:
         hid_module = _FakeHidModule(

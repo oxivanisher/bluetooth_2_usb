@@ -134,10 +134,15 @@ def _maybe_write_wakeup_on_write(device_root: Path, enabled: bool) -> None:
     _write_text(wakeup_path, "1" if enabled else "0")
 
 
-def _resolve_udc_name() -> str:
-    controllers = sorted(entry.name for entry in Path("/sys/class/udc").iterdir())
+def _resolve_udc_name(udc_root: Path = Path("/sys/class/udc")) -> str:
+    try:
+        controllers = sorted(entry.name for entry in udc_root.iterdir() if entry.is_dir())
+    except OSError as exc:
+        raise FileNotFoundError(f"No UDC controller was found in {udc_root}") from exc
     if not controllers:
-        raise FileNotFoundError("No UDC controller was found in /sys/class/udc")
+        raise FileNotFoundError(f"No UDC controller was found in {udc_root}")
+    if len(controllers) > 1:
+        raise RuntimeError(f"Multiple UDC controllers were found in {udc_root}: {', '.join(controllers)}")
     return controllers[0]
 
 

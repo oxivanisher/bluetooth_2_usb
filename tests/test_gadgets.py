@@ -10,7 +10,13 @@ from unittest.mock import Mock, patch
 
 import usb_hid
 
-from bluetooth_2_usb.gadgets.config import USB_CFG_DIR_NAME, USB_LANGID_EN_US, rebuild_gadget, remove_owned_gadgets
+from bluetooth_2_usb.gadgets.config import (
+    USB_CFG_DIR_NAME,
+    USB_LANGID_EN_US,
+    _resolve_udc_name,
+    rebuild_gadget,
+    remove_owned_gadgets,
+)
 from bluetooth_2_usb.gadgets.identity import (
     USB_GADGET_PID_COMBO,
     USB_GADGET_VID_LINUX,
@@ -398,6 +404,27 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(keyboard_wakeup.read_text(encoding="utf-8").strip(), "1")
             self.assertEqual(mouse_wakeup.read_text(encoding="utf-8").strip(), "0")
             self.assertFalse((gadget_root / _hid_function_path(HID_FUNC_INDEX_CONSUMER) / "wakeup_on_write").exists())
+
+    async def test_resolve_udc_name_returns_the_only_controller(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            udc_root = Path(tmpdir)
+            (udc_root / "fe980000.usb").mkdir()
+
+            self.assertEqual(_resolve_udc_name(udc_root), "fe980000.usb")
+
+    async def test_resolve_udc_name_fails_when_no_controller_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaisesRegex(FileNotFoundError, "No UDC controller was found"):
+                _resolve_udc_name(Path(tmpdir))
+
+    async def test_resolve_udc_name_fails_when_multiple_controllers_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            udc_root = Path(tmpdir)
+            (udc_root / "aaa-host").mkdir()
+            (udc_root / "fe980000.usb").mkdir()
+
+            with self.assertRaisesRegex(RuntimeError, "Multiple UDC controllers"):
+                _resolve_udc_name(udc_root)
 
     async def test_remove_owned_gadgets_removes_default_and_project_gadget_trees(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

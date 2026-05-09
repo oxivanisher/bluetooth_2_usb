@@ -107,11 +107,11 @@ def debug_report(duration: int | None) -> int:
             if line
         ),
     )
-    command_block("Kernel", ["uname", "-a"])
+    command_block("Hardware model", ["bash", "-lc", "tr -d '\\0' </proc/device-tree/model 2>/dev/null || true"])
     command_block(
         "OS release", ["bash", "-lc", "grep -E '^(PRETTY_NAME|ID|VERSION|VERSION_CODENAME)=' /etc/os-release"]
     )
-    command_block("Hardware model", ["bash", "-lc", "tr -d '\\0' </proc/device-tree/model 2>/dev/null || true"])
+    command_block("Kernel", ["uname", "-a"])
     command_block(
         "config.txt dwc2 lines",
         [
@@ -133,23 +133,7 @@ def debug_report(duration: int | None) -> int:
             + "printf 'state=' && cat /var/lib/bluetooth_2_usb/usb_identity.json || true",
         ],
     )
-    command_block("Overlay and tmpfs mounts", ["findmnt", "-t", "overlay,tmpfs"])
-    command_block("Bluetooth state mount", ["findmnt", "-n", "-T", "/var/lib/bluetooth"])
-    if config is not None:
-        command_block("Persistent state storage mount", ["findmnt", "-n", config.persist_mount])
-    if PATHS.readonly_env_file.is_file():
-        command_block("Persistent Bluetooth state config", ["cat", PATHS.readonly_env_file])
     command_block("Service status", ["systemctl", "--no-pager", "--full", "status", PATHS.service_unit])
-    command_block("Recent service journal", ["journalctl", "-b", "-u", PATHS.service_unit, "-n", "200", "--no-pager"])
-    command_block("bluetooth.service status", ["systemctl", "--no-pager", "--full", "status", "bluetooth.service"])
-    command_block(
-        "Relevant kernel log lines",
-        ["bash", "-lc", "dmesg | grep -Ei 'dwc2|gadget|udc|bluetooth|overlay' | tail -200 || true"],
-    )
-    command_block("bluetoothctl show", ["bluetoothctl", "show"])
-    command_block("Paired devices", ["bluetoothctl", "devices", "Paired"])
-    command_block("btmgmt info", ["btmgmt", "info"])
-    text_block("rfkill bluetooth state", rfkill_list_bluetooth())
     if PATHS.venv_python.exists():
         command_block("CLI version", [PATHS.venv_python, "-m", "bluetooth_2_usb", "--version"])
         command_block("CLI environment validation", [PATHS.venv_python, "-m", "bluetooth_2_usb", "--validate-env"])
@@ -157,9 +141,29 @@ def debug_report(duration: int | None) -> int:
             "Service settings summary",
             [PATHS.venv_python, "-m", "bluetooth_2_usb.service_settings", "--print-summary-json"],
         )
+    else:
+        text_block("CLI runtime", f"missing virtualenv at {PATHS.venv_python}")
+    command_block("bluetooth.service status", ["systemctl", "--no-pager", "--full", "status", "bluetooth.service"])
+    command_block("bluetoothctl show", ["bluetoothctl", "show"])
+    command_block("btmgmt info", ["btmgmt", "info"])
+    text_block("rfkill bluetooth state", rfkill_list_bluetooth())
+    command_block("Paired devices", ["bluetoothctl", "devices", "Paired"])
+    if PATHS.venv_python.exists():
         command_block(
             "Device inventory (json)", [PATHS.venv_python, "-m", "bluetooth_2_usb", "--list", "--output", "json"]
         )
+    command_block("Overlay and tmpfs mounts", ["findmnt", "-t", "overlay,tmpfs"])
+    command_block("Bluetooth state mount", ["findmnt", "-n", "-T", "/var/lib/bluetooth"])
+    if config is not None:
+        command_block("Persistent state storage mount", ["findmnt", "-n", config.persist_mount])
+    if PATHS.readonly_env_file.is_file():
+        command_block("Persistent Bluetooth state config", ["cat", PATHS.readonly_env_file])
+    command_block("Recent service journal", ["journalctl", "-b", "-u", PATHS.service_unit, "-n", "200", "--no-pager"])
+    command_block(
+        "Relevant kernel log lines",
+        ["bash", "-lc", "dmesg | grep -Ei 'dwc2|gadget|udc|bluetooth|overlay' | tail -200 || true"],
+    )
+    if PATHS.venv_python.exists():
         with _status("Preparing live debug command"):
             try:
                 debug_command = run(
@@ -183,8 +187,6 @@ def debug_report(duration: int | None) -> int:
         )
         if debug_command:
             text_block("Live Bluetooth-2-USB debug output", _run_live_debug(debug_command, duration, hostname))
-    else:
-        text_block("CLI runtime", f"missing virtualenv at {PATHS.venv_python}")
 
     generated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     header = f"# bluetooth_2_usb debug report\n\n_Generated: {generated_at}_\n\n"
@@ -196,17 +198,28 @@ def debug_report(duration: int | None) -> int:
 
 def _run_live_debug(command: str, duration: int | None, hostname: str) -> str:
     stopped_service = False
-    if (
-        run(
-            ["systemctl", "is-active", "--quiet", PATHS.service_unit],
-            check=False,
-            timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
-        ).returncode
-        == 0
-    ):
-        stop = run(
-            ["systemctl", "stop", PATHS.service_unit], check=False, capture=True, timeout=DEBUG_COMMAND_TIMEOUT_SECONDS
+    try:
+        service_active = (
+            run(
+                ["systemctl", "is-active", "--quiet", PATHS.service_unit],
+                check=False,
+                timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
+            ).returncode
+            == 0
         )
+    except (OSError, OpsError) as exc:
+        return redact(f"Failed to inspect service state before live debug.\n{exc}", hostname)
+
+    if service_active:
+        try:
+            stop = run(
+                ["systemctl", "stop", PATHS.service_unit],
+                check=False,
+                capture=True,
+                timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
+            )
+        except (OSError, OpsError) as exc:
+            return redact(f"Failed to stop bluetooth_2_usb.service; live debug was not started.\n{exc}", hostname)
         if stop.returncode != 0:
             output_text = stop.stdout + stop.stderr
             return redact(
@@ -218,37 +231,44 @@ def _run_live_debug(command: str, duration: int | None, hostname: str) -> str:
     debug_output = ""
     try:
         timeout = duration
-        with tempfile.TemporaryFile("w+b") as output_file:
-            process = subprocess.Popen(
-                ["setsid", "bash", "--noprofile", "--norc", "-c", command],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-            try:
-                _tee_process_output(process, output_file, timeout, hostname)
-            except (subprocess.TimeoutExpired, KeyboardInterrupt):
-                _terminate_process_group(process)
-                _drain_process_output(process, output_file, hostname)
-            finally:
-                process_stdout = getattr(process, "stdout", None)
-                if process_stdout is not None:
-                    process_stdout.close()
-            output_file.seek(0)
-            debug_output = output_file.read().decode("utf-8", errors="replace")
+        try:
+            with tempfile.TemporaryFile("w+b") as output_file:
+                process = subprocess.Popen(
+                    ["setsid", "bash", "--noprofile", "--norc", "-c", command],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                )
+                try:
+                    _tee_process_output(process, output_file, timeout, hostname)
+                except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                    _terminate_process_group(process)
+                    _drain_process_output(process, output_file, hostname)
+                finally:
+                    process_stdout = getattr(process, "stdout", None)
+                    if process_stdout is not None:
+                        process_stdout.close()
+                output_file.seek(0)
+                debug_output = output_file.read().decode("utf-8", errors="replace")
+        except OSError as exc:
+            debug_output = f"Failed to start live debug command.\n{exc}"
     finally:
         if stopped_service:
-            start = run(
-                ["systemctl", "start", PATHS.service_unit],
-                check=False,
-                capture=True,
-                timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
-            )
-            if start.returncode != 0:
-                debug_output += (
-                    "\n[failed to restart bluetooth_2_usb.service: "
-                    + ((start.stdout + start.stderr).strip() or "<no output>")
-                    + "]"
+            try:
+                start = run(
+                    ["systemctl", "start", PATHS.service_unit],
+                    check=False,
+                    capture=True,
+                    timeout=DEBUG_COMMAND_TIMEOUT_SECONDS,
                 )
+            except (OSError, OpsError) as exc:
+                debug_output += f"\n[failed to restart bluetooth_2_usb.service: {exc}]"
+            else:
+                if start.returncode != 0:
+                    debug_output += (
+                        "\n[failed to restart bluetooth_2_usb.service: "
+                        + ((start.stdout + start.stderr).strip() or "<no output>")
+                        + "]"
+                    )
     return redact(debug_output, hostname) or "<no output>"
 
 
@@ -297,9 +317,16 @@ def _drain_process_output(process: subprocess.Popen[bytes], output_file, hostnam
 
 
 def _terminate_process_group(process: subprocess.Popen) -> None:
-    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        process.wait()
+        return
     try:
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         process.wait()

@@ -590,8 +590,11 @@ def discover_gadget_node_candidates(devices: str, hid_module: Any | None = None)
     hid_module = _load_hidapi() if hid_module is None else hid_module
     infos = _iter_hid_infos(hid_module)
     if not devices.strip():
-        raise ValueError("devices must not be empty")
-    device_filters = [DeviceFilter(device) for device in parse_devices(devices)]
+        raise MissingNodeError("devices must not be empty")
+    try:
+        device_filters = [DeviceFilter(device) for device in parse_devices(devices)]
+    except ValueError as exc:
+        raise MissingNodeError(f"Invalid devices filter {devices!r}: {exc}") from exc
 
     keyboard_nodes: list[HidDeviceInfo] = []
     mouse_nodes: list[HidDeviceInfo] = []

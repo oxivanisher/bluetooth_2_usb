@@ -16,14 +16,16 @@ Use `smoketest` as the quick health gate:
 sudo bluetooth_2_usb smoketest
 ```
 
-Use verbose mode when you need the full probe transcript:
+Use verbose mode when you need the full interpreted probe transcript for local
+diagnosis:
 
 ```bash
 sudo bluetooth_2_usb smoketest --verbose
 ```
 
 Use `debug` when you need a redacted report under
-`/var/log/bluetooth_2_usb/`:
+`/var/log/bluetooth_2_usb/` with raw command output, service logs, and optional
+live runtime output:
 
 ```bash
 sudo bluetooth_2_usb debug --duration 10

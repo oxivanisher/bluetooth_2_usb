@@ -18,26 +18,21 @@ special drivers are required on the target system.
 
 This is the quickest supported path to a working setup.
 
-### 1. Clone the project to the managed install path
+### 1. Clone and install
 
 ```bash
 sudo apt update && sudo apt install -y git
 sudo git clone https://github.com/quaxalber/bluetooth_2_usb.git /opt/bluetooth_2_usb
-```
-
-### 2. Install
-
-```bash
 cd /opt/bluetooth_2_usb && sudo env PYTHONPATH=src python3 -m bluetooth_2_usb install
 ```
 
-### 3. Reboot
+### 2. Reboot
 
 ```bash
 sudo reboot
 ```
 
-### 4. Pair your Bluetooth device
+### 3. Pair your Bluetooth device
 
 ```bash
 bluetoothctl
@@ -54,13 +49,13 @@ exit
 > Some devices trigger an interactive `bluetoothctl` authorization prompt
 > during pairing. Answer it immediately or BlueZ may cancel the request.
 
-### 5. Run the smoketest
+### 4. Run the smoketest
 
 ```bash
 sudo bluetooth_2_usb smoketest
 ```
 
-### 6. Connect the Pi to the target host
+### 5. Connect the Pi to the target host
 
 - Pi 4B / 5: use the USB-C power port
 - Pi Zero W / Zero 2 W: use the USB data port
@@ -101,8 +96,8 @@ sudo bluetooth_2_usb smoketest
 sudo bluetooth_2_usb debug --duration 10
 ```
 
-Use `smoketest --verbose` or [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-when you need detailed probe output and interpretation.
+Use `smoketest --verbose` for the full probe transcript. Use `debug` when you
+need a redacted report with logs and live runtime output.
 
 ## Runtime behavior
 

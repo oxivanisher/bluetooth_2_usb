@@ -191,7 +191,33 @@ class SmokeTest:
                 ],
             ),
             (
+                "Service and Runtime",
+                [
+                    (
+                        "Virtualenv interpreter",
+                        str(PATHS.venv_python) if venv_present else f"missing: {PATHS.venv_python}",
+                    ),
+                    ("CLI environment validation", "passed" if validate_log[0] == 0 else "failed"),
+                    ("Runtime settings validation", "passed" if service_settings_log[0] == 0 else "failed"),
+                ],
+            ),
+            (
                 "Bluetooth",
+                [
+                    ("Bluetooth controller", "powered" if bt_show[0] == 0 else "unknown"),
+                    ("btmgmt info", "succeeded" if btmgmt[0] == 0 else "failed"),
+                    (
+                        "Bluetooth rfkill",
+                        (
+                            "not blocked"
+                            if entries and not bluetooth_rfkill_blocked()
+                            else ("blocked" if entries else "not found")
+                        ),
+                    ),
+                ],
+            ),
+            (
+                "Devices",
                 [
                     ("Relayable device count", str(relayable_count)),
                     ("Paired Bluetooth device count", str(paired_count)),
@@ -473,11 +499,13 @@ class SmokeTest:
             "btmgmt info",
             "Device inventory",
         ]
-        for title, (_, text) in zip(titles, logs, strict=True):
+        for title, (_, text) in zip(titles[:4], logs[:4], strict=True):
             print(f"\n## {title}")
             print(text or "<no output>")
         print("\n## rfkill bluetooth")
         print("\n".join(entry.line() for entry in rfkill_entries) or "<no output>")
+        print(f"\n## {titles[4]}")
+        print(logs[4][1] or "<no output>")
         print("\n## Mount details")
         print(
             self._capture_with_status(["findmnt", "-n", "-T", "/"], "Collecting root mount details")[1] or "<no output>"
@@ -492,13 +520,6 @@ class SmokeTest:
         print(
             self._capture_with_status(
                 ["systemctl", "--no-pager", "--full", "status", PATHS.service_unit], "Collecting service status"
-            )[1]
-            or "<no output>"
-        )
-        print("\n## Journal")
-        print(
-            self._capture_with_status(
-                ["journalctl", "-b", "-u", PATHS.service_unit, "-n", "100", "--no-pager"], "Collecting service journal"
             )[1]
             or "<no output>"
         )

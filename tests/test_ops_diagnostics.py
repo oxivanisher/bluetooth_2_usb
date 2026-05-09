@@ -10,12 +10,12 @@ from unittest.mock import patch
 
 from bluetooth_2_usb.ops.commands import OpsError
 from bluetooth_2_usb.ops.diagnostics import ProbeStatus, SmokeTest, debug_report
-from bluetooth_2_usb.ops.diagnostics import report as diagnostics_report
+from bluetooth_2_usb.ops.diagnostics import debug as diagnostics_debug
 from bluetooth_2_usb.ops.diagnostics.redaction import redact
 from bluetooth_2_usb.ops.paths import ManagedPaths
 from bluetooth_2_usb.ops.readonly import ReadonlyConfig
 
-DIAGNOSTICS_REPORT = "bluetooth_2_usb.ops.diagnostics.report"
+DIAGNOSTICS_DEBUG = "bluetooth_2_usb.ops.diagnostics.debug"
 DIAGNOSTICS_SMOKETEST = "bluetooth_2_usb.ops.diagnostics.smoketest"
 
 
@@ -25,6 +25,13 @@ class _RfkillEntry:
 
 
 class OpsDiagnosticsTest(unittest.TestCase):
+    def assert_ordered_substrings(self, text: str, substrings: list[str]) -> None:
+        previous = -1
+        for substring in substrings:
+            position = text.index(substring)
+            self.assertGreater(position, previous, substring)
+            previous = position
+
     def run_smoketest_harness(
         self,
         smoke: SmokeTest,
@@ -352,9 +359,25 @@ class OpsDiagnosticsTest(unittest.TestCase):
                 self.run_smoketest_harness(smoke, root=Path(tmpdir), rfkill_entries=[_RfkillEntry()])
 
         output = stdout.getvalue()
-        self.assertLess(output.index("### Boot and USB"), output.index("### Bluetooth"))
-        self.assertLess(output.index("### Bluetooth"), output.index("### Read-Only Mode"))
-        self.assertLess(output.index("### Read-Only Mode"), output.index("### Result"))
+        self.assert_ordered_substrings(
+            output,
+            [
+                "### Boot and USB",
+                "### Service and Runtime",
+                "### Bluetooth",
+                "### Devices",
+                "### Read-Only Mode",
+                "### Result",
+            ],
+        )
+
+        bluetooth_group = output[output.index("### Bluetooth") : output.index("### Devices")]
+        devices_group = output[output.index("### Devices") : output.index("### Read-Only Mode")]
+        self.assertNotIn("Relayable device count:", bluetooth_group)
+        self.assertNotIn("Paired Bluetooth device count:", bluetooth_group)
+        self.assertIn("Relayable device count:", devices_group)
+        self.assertIn("Paired Bluetooth device count:", devices_group)
+        self.assertNotIn("## Journal", output)
 
         readonly_group = output[output.index("### Read-Only Mode") : output.index("### Result")]
         self.assertLess(readonly_group.index("Read-only state:"), readonly_group.index("OverlayFS boot setting:"))
@@ -365,6 +388,83 @@ class OpsDiagnosticsTest(unittest.TestCase):
             readonly_group.index("Bluetooth state storage:"), readonly_group.index("Bluetooth state source:")
         )
         self.assertEqual(smoke.result_dict()["summary"]["Bluetooth state storage"], "rootfs")
+
+    def test_debug_report_orders_sections_for_support_collection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            paths = ManagedPaths(install_dir=root / "install", log_dir=root / "logs")
+            paths.venv_python.parent.mkdir(parents=True)
+            paths.venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+            config = ReadonlyConfig(
+                persist_mount=root / "persist",
+                persist_bluetooth_dir=root / "persist" / "bluetooth",
+                persist_spec="",
+                persist_device="",
+            )
+
+            def fake_run(command, *, check=True, capture=False, timeout=None, **kwargs):
+                del check, capture, timeout, kwargs
+
+                class Completed:
+                    returncode = 0
+                    stdout = ""
+                    stderr = ""
+
+                if command[-2:] == ["--print-shell-command", "--append-debug"]:
+                    Completed.stdout = ""
+                return Completed()
+
+            with ExitStack() as stack:
+                stack.enter_context(patch.dict(os.environ, {"HOSTNAME": "test-host"}))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.PATHS", paths))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.load_readonly_config", return_value=config))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.overlay_status", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.readonly_mode", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.bluetooth_state_persistent", return_value=False))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.rfkill_list_bluetooth", return_value=""))
+                stack.enter_context(
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.detect_boot_dir", return_value=root / "boot")
+                )
+                stack.enter_context(
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_config_path", return_value=root / "config.txt")
+                )
+                stack.enter_context(
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
+                )
+
+                self.assertEqual(debug_report(None), 0)
+
+            report = next(paths.log_dir.glob("debug_*.md")).read_text(encoding="utf-8")
+            self.assert_ordered_substrings(
+                report,
+                [
+                    "## System summary",
+                    "## Hardware model",
+                    "## OS release",
+                    "## Kernel",
+                    "## config.txt dwc2 lines",
+                    "## cmdline.txt",
+                    "## UDC controllers",
+                    "## USB gadget identity",
+                    "## Service status",
+                    "## CLI version",
+                    "## CLI environment validation",
+                    "## Service settings summary",
+                    "## bluetooth.service status",
+                    "## bluetoothctl show",
+                    "## btmgmt info",
+                    "## rfkill bluetooth state",
+                    "## Paired devices",
+                    "## Device inventory (json)",
+                    "## Overlay and tmpfs mounts",
+                    "## Bluetooth state mount",
+                    "## Persistent state storage mount",
+                    "## Recent service journal",
+                    "## Relevant kernel log lines",
+                    "## Live debug setup",
+                ],
+            )
 
     def test_debug_report_keeps_writing_when_initial_systemctl_probe_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -389,23 +489,23 @@ class OpsDiagnosticsTest(unittest.TestCase):
                 return Completed()
 
             with patch.dict(os.environ, {"HOSTNAME": "test-host"}):
-                with patch(f"{DIAGNOSTICS_REPORT}.PATHS", paths):
-                    with patch(f"{DIAGNOSTICS_REPORT}.run", side_effect=fake_run):
-                        with patch(f"{DIAGNOSTICS_REPORT}.load_readonly_config", return_value=config):
-                            with patch(f"{DIAGNOSTICS_REPORT}.overlay_status", return_value="disabled"):
-                                with patch(f"{DIAGNOSTICS_REPORT}.readonly_mode", return_value="disabled"):
-                                    with patch(f"{DIAGNOSTICS_REPORT}.bluetooth_state_persistent", return_value=False):
-                                        with patch(f"{DIAGNOSTICS_REPORT}.rfkill_list_bluetooth", return_value=""):
+                with patch(f"{DIAGNOSTICS_DEBUG}.PATHS", paths):
+                    with patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run):
+                        with patch(f"{DIAGNOSTICS_DEBUG}.load_readonly_config", return_value=config):
+                            with patch(f"{DIAGNOSTICS_DEBUG}.overlay_status", return_value="disabled"):
+                                with patch(f"{DIAGNOSTICS_DEBUG}.readonly_mode", return_value="disabled"):
+                                    with patch(f"{DIAGNOSTICS_DEBUG}.bluetooth_state_persistent", return_value=False):
+                                        with patch(f"{DIAGNOSTICS_DEBUG}.rfkill_list_bluetooth", return_value=""):
                                             with patch(
-                                                f"{DIAGNOSTICS_REPORT}.boot_config.detect_boot_dir",
+                                                f"{DIAGNOSTICS_DEBUG}.boot_config.detect_boot_dir",
                                                 return_value=root / "boot",
                                             ):
                                                 with patch(
-                                                    f"{DIAGNOSTICS_REPORT}.boot_config.boot_config_path",
+                                                    f"{DIAGNOSTICS_DEBUG}.boot_config.boot_config_path",
                                                     return_value=root / "config.txt",
                                                 ):
                                                     with patch(
-                                                        f"{DIAGNOSTICS_REPORT}.boot_config.boot_cmdline_path",
+                                                        f"{DIAGNOSTICS_DEBUG}.boot_config.boot_cmdline_path",
                                                         return_value=root / "cmdline.txt",
                                                     ):
                                                         self.assertEqual(debug_report(None), 0)
@@ -438,21 +538,21 @@ class OpsDiagnosticsTest(unittest.TestCase):
 
             with ExitStack() as stack:
                 stack.enter_context(patch.dict(os.environ, {"HOSTNAME": "test-host"}))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.PATHS", paths))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.run", side_effect=fake_run))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.load_readonly_config", return_value=config))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.overlay_status", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.readonly_mode", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.bluetooth_state_persistent", return_value=False))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.rfkill_list_bluetooth", return_value=""))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.PATHS", paths))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.load_readonly_config", return_value=config))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.overlay_status", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.readonly_mode", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.bluetooth_state_persistent", return_value=False))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.rfkill_list_bluetooth", return_value=""))
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.detect_boot_dir", return_value=root / "boot")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.detect_boot_dir", return_value=root / "boot")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_config_path", return_value=root / "config.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_config_path", return_value=root / "config.txt")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
                 )
 
                 self.assertEqual(debug_report(None), 0)
@@ -479,22 +579,22 @@ class OpsDiagnosticsTest(unittest.TestCase):
 
             with ExitStack() as stack:
                 stack.enter_context(patch.dict(os.environ, {"HOSTNAME": "test-host"}))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.PATHS", paths))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.PATHS", paths))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run))
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.load_readonly_config", side_effect=OpsError("invalid readonly env"))
+                    patch(f"{DIAGNOSTICS_DEBUG}.load_readonly_config", side_effect=OpsError("invalid readonly env"))
                 )
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.overlay_status", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.readonly_mode", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.rfkill_list_bluetooth", return_value=""))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.overlay_status", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.readonly_mode", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.rfkill_list_bluetooth", return_value=""))
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.detect_boot_dir", return_value=root / "boot")
-                )
-                stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_config_path", return_value=root / "config.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.detect_boot_dir", return_value=root / "boot")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_config_path", return_value=root / "config.txt")
+                )
+                stack.enter_context(
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
                 )
 
                 self.assertEqual(debug_report(None), 0)
@@ -520,22 +620,22 @@ class OpsDiagnosticsTest(unittest.TestCase):
 
             with ExitStack() as stack:
                 stack.enter_context(patch.dict(os.environ, {"HOSTNAME": "test-host"}))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.PATHS", paths))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.PATHS", paths))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run))
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.load_readonly_config", side_effect=OpsError("invalid readonly env"))
+                    patch(f"{DIAGNOSTICS_DEBUG}.load_readonly_config", side_effect=OpsError("invalid readonly env"))
                 )
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.overlay_status", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.readonly_mode", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.rfkill_list_bluetooth", return_value=""))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.overlay_status", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.readonly_mode", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.rfkill_list_bluetooth", return_value=""))
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.detect_boot_dir", return_value=root / "boot")
-                )
-                stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_config_path", return_value=root / "config.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.detect_boot_dir", return_value=root / "boot")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_config_path", return_value=root / "config.txt")
+                )
+                stack.enter_context(
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
                 )
 
                 self.assertEqual(debug_report(None), 0)
@@ -570,21 +670,21 @@ class OpsDiagnosticsTest(unittest.TestCase):
 
             with ExitStack() as stack:
                 stack.enter_context(patch.dict(os.environ, {"HOSTNAME": "test-host"}))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.PATHS", paths))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.run", side_effect=fake_run))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.load_readonly_config", return_value=config))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.overlay_status", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.readonly_mode", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.bluetooth_state_persistent", return_value=False))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.rfkill_list_bluetooth", return_value=""))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.PATHS", paths))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.load_readonly_config", return_value=config))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.overlay_status", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.readonly_mode", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.bluetooth_state_persistent", return_value=False))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.rfkill_list_bluetooth", return_value=""))
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.detect_boot_dir", return_value=root / "boot")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.detect_boot_dir", return_value=root / "boot")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_config_path", return_value=root / "config.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_config_path", return_value=root / "config.txt")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
                 )
 
                 self.assertEqual(debug_report(None), 0)
@@ -636,25 +736,25 @@ class OpsDiagnosticsTest(unittest.TestCase):
 
             with ExitStack() as stack:
                 stack.enter_context(patch.dict(os.environ, {"HOSTNAME": "test-host"}))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.PATHS", paths))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.run", side_effect=fake_run))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.load_readonly_config", return_value=config))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.overlay_status", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.readonly_mode", return_value="disabled"))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.bluetooth_state_persistent", return_value=False))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.rfkill_list_bluetooth", return_value=""))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.PATHS", paths))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.load_readonly_config", return_value=config))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.overlay_status", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.readonly_mode", return_value="disabled"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.bluetooth_state_persistent", return_value=False))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.rfkill_list_bluetooth", return_value=""))
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.detect_boot_dir", return_value=root / "boot")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.detect_boot_dir", return_value=root / "boot")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_config_path", return_value=root / "config.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_config_path", return_value=root / "config.txt")
                 )
                 stack.enter_context(
-                    patch(f"{DIAGNOSTICS_REPORT}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
+                    patch(f"{DIAGNOSTICS_DEBUG}.boot_config.boot_cmdline_path", return_value=root / "cmdline.txt")
                 )
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.subprocess.Popen", return_value=process))
-                stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}._tee_process_output", side_effect=KeyboardInterrupt))
-                killpg = stack.enter_context(patch(f"{DIAGNOSTICS_REPORT}.os.killpg"))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.subprocess.Popen", return_value=process))
+                stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}._tee_process_output", side_effect=KeyboardInterrupt))
+                killpg = stack.enter_context(patch(f"{DIAGNOSTICS_DEBUG}.os.killpg"))
 
                 self.assertEqual(debug_report(None), 0)
 
@@ -674,7 +774,7 @@ class OpsDiagnosticsTest(unittest.TestCase):
         stdout = StringIO()
         with tempfile.TemporaryFile("w+b") as output_file, redirect_stdout(stdout):
             try:
-                diagnostics_report._tee_process_output(process, output_file, 2, "test-host")
+                diagnostics_debug._tee_process_output(process, output_file, 2, "test-host")
                 output_file.seek(0)
                 captured = output_file.read().decode("utf-8", errors="replace")
             finally:
@@ -687,13 +787,97 @@ class OpsDiagnosticsTest(unittest.TestCase):
 
     def test_live_debug_drains_shutdown_output_after_timeout(self) -> None:
         command = "trap 'printf shutdown-test-host\\\\n; exit 0' TERM; printf started-test-host\\\\n; while true; do sleep 1; done"
-        with patch(f"{DIAGNOSTICS_REPORT}.run") as run_mock:
+        with patch(f"{DIAGNOSTICS_DEBUG}.run") as run_mock:
             run_mock.return_value.returncode = 1
             stdout = StringIO()
             with redirect_stdout(stdout):
-                output = diagnostics_report._run_live_debug(command, 1, "test-host")
+                output = diagnostics_debug._run_live_debug(command, 1, "test-host")
 
         self.assertIn("started-<<REDACTED_HOSTNAME>>", stdout.getvalue())
         self.assertIn("shutdown-<<REDACTED_HOSTNAME>>", stdout.getvalue())
         self.assertIn("started-<<REDACTED_HOSTNAME>>", output)
         self.assertIn("shutdown-<<REDACTED_HOSTNAME>>", output)
+
+    def test_live_debug_returns_setup_failure_when_service_probe_raises(self) -> None:
+        with patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=OpsError("systemctl unavailable")):
+            output = diagnostics_debug._run_live_debug("echo never", 1, "test-host")
+
+        self.assertIn("Failed to inspect service state before live debug", output)
+        self.assertIn("systemctl unavailable", output)
+
+    def test_live_debug_returns_setup_failure_when_popen_raises(self) -> None:
+        class Completed:
+            returncode = 1
+
+        with (
+            patch(f"{DIAGNOSTICS_DEBUG}.run", return_value=Completed()),
+            patch(f"{DIAGNOSTICS_DEBUG}.subprocess.Popen", side_effect=FileNotFoundError("setsid missing")),
+        ):
+            output = diagnostics_debug._run_live_debug("echo never", 1, "test-host")
+
+        self.assertIn("Failed to start live debug command", output)
+        self.assertIn("setsid missing", output)
+
+    def test_live_debug_reports_restart_failure_without_raising(self) -> None:
+        calls: list[list[object]] = []
+
+        class Completed:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def fake_run(command, *, check=True, capture=False, timeout=None, **kwargs):
+            del check, capture, timeout, kwargs
+            calls.append(command)
+            if command[:3] == ["systemctl", "is-active", "--quiet"]:
+                return Completed()
+            if command[:2] == ["systemctl", "start"]:
+                raise OpsError("restart failed")
+            return Completed()
+
+        with (
+            patch(f"{DIAGNOSTICS_DEBUG}.run", side_effect=fake_run),
+            patch(f"{DIAGNOSTICS_DEBUG}.subprocess.Popen", side_effect=FileNotFoundError("setsid missing")),
+        ):
+            output = diagnostics_debug._run_live_debug("echo never", 1, "test-host")
+
+        self.assertIn("failed to restart bluetooth_2_usb.service", output)
+        self.assertIn("restart failed", output)
+        self.assertIn(["systemctl", "stop", "bluetooth_2_usb.service"], calls)
+
+    def test_terminate_process_group_tolerates_already_exited_process_on_sigterm(self) -> None:
+        class Process:
+            pid = 1234
+
+            def __init__(self) -> None:
+                self.wait_calls = 0
+
+            def wait(self, timeout=None):
+                del timeout
+                self.wait_calls += 1
+                return 0
+
+        process = Process()
+        with patch(f"{DIAGNOSTICS_DEBUG}.os.killpg", side_effect=ProcessLookupError):
+            diagnostics_debug._terminate_process_group(process)
+
+        self.assertEqual(process.wait_calls, 1)
+
+    def test_terminate_process_group_tolerates_already_exited_process_on_sigkill(self) -> None:
+        class Process:
+            pid = 1234
+
+            def __init__(self) -> None:
+                self.wait_calls = 0
+
+            def wait(self, timeout=None):
+                self.wait_calls += 1
+                if timeout == 2:
+                    raise subprocess.TimeoutExpired("debug", timeout)
+                return 0
+
+        process = Process()
+        with patch(f"{DIAGNOSTICS_DEBUG}.os.killpg", side_effect=[None, ProcessLookupError]):
+            diagnostics_debug._terminate_process_group(process)
+
+        self.assertEqual(process.wait_calls, 2)
