@@ -34,6 +34,10 @@ READONLY_SERVICE = "bluetooth_2_usb.ops.readonly.service"
 READONLY_STATUS = "bluetooth_2_usb.ops.readonly.status"
 READONLY_UNITS = "bluetooth_2_usb.ops.readonly.units"
 READONLY_WORKFLOWS = "bluetooth_2_usb.ops.readonly.workflows"
+OPS_BLUETOOTH = "bluetooth_2_usb.ops.bluetooth"
+OPS_BOOT_CONFIG = "bluetooth_2_usb.ops.boot_config"
+OPS_DEPLOYMENT = "bluetooth_2_usb.ops.deployment"
+PATHLIB_PATH = "pathlib.Path"
 
 
 def _write_rfkill_entry(
@@ -78,8 +82,8 @@ class BluetoothRfkillOpsTest(unittest.TestCase):
             _write_rfkill_entry(rfkill_root, 0, soft="1", hard="0", state="0")
 
             with (
-                patch("bluetooth_2_usb.ops.bluetooth.rfkill_root", return_value=rfkill_root),
-                patch("bluetooth_2_usb.ops.bluetooth.run", side_effect=OpsError("missing rfkill")),
+                patch(f"{OPS_BLUETOOTH}.rfkill_root", return_value=rfkill_root),
+                patch(f"{OPS_BLUETOOTH}.run", side_effect=OpsError("missing rfkill")),
             ):
                 output = rfkill_list_bluetooth()
 
@@ -120,7 +124,7 @@ class BootConfigOpsTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("bluetooth_2_usb.ops.boot_config.boot_config_model_filters", return_value=["cm4"]):
+            with patch(f"{OPS_BOOT_CONFIG}.boot_config_model_filters", return_value=["cm4"]):
                 self.assertEqual(boot_config.configured_initramfs_file(config), "initramfs-cm4")
 
     def test_normalize_dwc2_overlay_replaces_stale_lines_under_all_section(self) -> None:
@@ -163,15 +167,14 @@ class BootConfigOpsTest(unittest.TestCase):
 
     def test_boot_initramfs_target_rejects_unsafe_paths(self) -> None:
         for target in ("/boot/initramfs8", "../initramfs8", "nested/initramfs8"):
-            with self.subTest(target=target):
-                with self.assertRaises(OpsError):
-                    boot_config.boot_initramfs_target_path(target)
+            with self.subTest(target=target), self.assertRaises(OpsError):
+                boot_config.boot_initramfs_target_path(target)
 
     def test_kernel_config_candidates_include_detected_firmware_boot_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             firmware = Path(tmpdir) / "firmware"
 
-            with patch("bluetooth_2_usb.ops.boot_config.detect_boot_dir", return_value=firmware):
+            with patch(f"{OPS_BOOT_CONFIG}.detect_boot_dir", return_value=firmware):
                 candidates = boot_config.kernel_config_candidates("6.12.81-b2u-wake")
 
         self.assertEqual(
@@ -190,8 +193,8 @@ class BootConfigOpsTest(unittest.TestCase):
             )
 
             with (
-                patch("bluetooth_2_usb.ops.boot_config.detect_boot_dir", return_value=firmware),
-                patch("bluetooth_2_usb.ops.boot_config.current_kernel_release", return_value=release),
+                patch(f"{OPS_BOOT_CONFIG}.detect_boot_dir", return_value=firmware),
+                patch(f"{OPS_BOOT_CONFIG}.current_kernel_release", return_value=release),
             ):
                 snippet = boot_config.kernel_config_snippet()
 
@@ -358,9 +361,8 @@ class ReadonlyConfigTest(unittest.TestCase):
 
             return Completed()
 
-        with patch(f"{READONLY_STATUS}.run", side_effect=fake_run):
-            with patch("pathlib.Path.is_dir", return_value=True):
-                self.assertFalse(bluetooth_state_persistent(config))
+        with patch(f"{READONLY_STATUS}.run", side_effect=fake_run), patch(f"{PATHLIB_PATH}.is_dir", return_value=True):
+            self.assertFalse(bluetooth_state_persistent(config))
 
     def test_bluetooth_state_persistent_returns_false_when_findmnt_fails(self) -> None:
         config = ReadonlyConfig(
@@ -443,10 +445,12 @@ class ReadonlyConfigTest(unittest.TestCase):
 
             return Completed()
 
-        with patch("bluetooth_2_usb.ops.deployment.service_installed", return_value=True):
-            with patch(f"{READONLY_SERVICE}.run", side_effect=fake_run):
-                was_active = stop_b2u_if_installed("during test")
-                restart_b2u_if_installed(was_active, "during test")
+        with (
+            patch(f"{OPS_DEPLOYMENT}.service_installed", return_value=True),
+            patch(f"{READONLY_SERVICE}.run", side_effect=fake_run),
+        ):
+            was_active = stop_b2u_if_installed("during test")
+            restart_b2u_if_installed(was_active, "during test")
 
         self.assertFalse(was_active)
         self.assertNotIn(["systemctl", "stop", "bluetooth_2_usb.service"], calls)
@@ -682,9 +686,8 @@ class ReadonlyConfigTest(unittest.TestCase):
             )
             stack.enter_context(patch(f"{READONLY_WORKFLOWS}.run", side_effect=fake_run))
 
-            with self.assertRaises(OpsError):
-                with redirect_stdout(StringIO()) as stdout:
-                    enable_readonly()
+            with self.assertRaises(OpsError), redirect_stdout(StringIO()) as stdout:
+                enable_readonly()
 
         self.assertIn(["raspi-config", "nonint", "enable_overlayfs"], commands)
         self.assertNotIn(["raspi-config", "nonint", "disable_overlayfs"], commands)
@@ -715,9 +718,8 @@ class ReadonlyConfigTest(unittest.TestCase):
             stack.enter_context(patch(f"{READONLY_WORKFLOWS}.run", side_effect=OpsError("raspi-config failed")))
             write_config = stack.enter_context(patch(f"{READONLY_WORKFLOWS}.write_readonly_config"))
 
-            with self.assertRaises(OpsError):
-                with redirect_stdout(StringIO()) as stdout:
-                    enable_readonly()
+            with self.assertRaises(OpsError), redirect_stdout(StringIO()) as stdout:
+                enable_readonly()
 
         write_config.assert_not_called()
         self.assertIn("readonly status", stdout.getvalue())
@@ -743,9 +745,11 @@ class ReadonlyConfigTest(unittest.TestCase):
             )
             run_command = stack.enter_context(patch(f"{READONLY_WORKFLOWS}.run"))
 
-            with redirect_stdout(StringIO()) as stdout:
-                with self.assertRaisesRegex(OpsError, "Rerun bluetooth_2_usb readonly setup"):
-                    enable_readonly()
+            with (
+                redirect_stdout(StringIO()) as stdout,
+                self.assertRaisesRegex(OpsError, "Rerun bluetooth_2_usb readonly setup"),
+            ):
+                enable_readonly()
 
         run_command.assert_not_called()
         self.assertIn("bad package", stdout.getvalue())
@@ -778,9 +782,9 @@ class ReadonlyConfigTest(unittest.TestCase):
             patch(f"{READONLY_WORKFLOWS}.require_commands"),
             patch(f"{READONLY_WORKFLOWS}.load_readonly_config", return_value=ReadonlyConfig()),
             patch(f"{READONLY_WORKFLOWS}.current_root_filesystem_type", return_value="overlay"),
+            self.assertRaisesRegex(OpsError, "overlay-backed"),
         ):
-            with self.assertRaisesRegex(OpsError, "overlay-backed"):
-                migrate_bluetooth_state_to_rootfs()
+            migrate_bluetooth_state_to_rootfs()
 
     def test_migrate_bluetooth_state_refuses_when_persistent_state_is_not_mounted(self) -> None:
         config = ReadonlyConfig(
@@ -794,9 +798,9 @@ class ReadonlyConfigTest(unittest.TestCase):
             patch(f"{READONLY_WORKFLOWS}.load_readonly_config", return_value=config),
             patch(f"{READONLY_WORKFLOWS}.current_root_filesystem_type", return_value="ext4"),
             patch(f"{READONLY_WORKFLOWS}.bluetooth_state_persistent", return_value=False),
+            self.assertRaisesRegex(OpsError, "not mounted"),
         ):
-            with self.assertRaisesRegex(OpsError, "not mounted"):
-                migrate_bluetooth_state_to_rootfs()
+            migrate_bluetooth_state_to_rootfs()
 
     def test_migrate_bluetooth_state_copies_state_and_removes_bind_mount(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

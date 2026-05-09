@@ -123,6 +123,10 @@ LOOPBACK_CLI = "bluetooth_2_usb.loopback.cli"
 LOOPBACK_INJECT = "bluetooth_2_usb.loopback.inject"
 WINDOWS_USB_ID = f"vid_{usb_udev_hex_u16(USB_GADGET_VID_LINUX)}&pid_{usb_udev_hex_u16(USB_GADGET_PID_COMBO)}"
 WINDOWS_USB_ID_UPPER = WINDOWS_USB_ID.upper()
+LOOPBACK_CAPTURE_WINDOWS = "bluetooth_2_usb.loopback.capture_windows"
+OS_ENVIRON = "os.environ"
+PATHLIB_PATH = "pathlib.Path"
+SYS_MODULES = "sys.modules"
 
 
 def _chunk_count(value: int, report_limit: int) -> int:
@@ -1099,7 +1103,7 @@ class WindowsRawInputHelpersTest(unittest.TestCase):
             )
 
     def test_raw_input_pump_reports_win32_api_errors_as_capture_failures(self) -> None:
-        with patch("bluetooth_2_usb.loopback.capture_windows._create_message_window", side_effect=OSError("boom")):
+        with patch(f"{LOOPBACK_CAPTURE_WINDOWS}._create_message_window", side_effect=OSError("boom")):
             result = capture_windows._pump_raw_input(
                 timeout_sec=1.0,
                 keyboard_candidate_identities=(),
@@ -1175,14 +1179,13 @@ class LoopbackInjectTest(unittest.TestCase):
         self.assertEqual(capabilities[ecodes.EV_KEY], sorted({step.code for step in CONSUMER_STEPS}))
 
     def test_configured_service_settle_accepts_zero_override(self) -> None:
-        with patch.dict("os.environ", {SERVICE_SETTLE_ENV: "0"}):
+        with patch.dict(OS_ENVIRON, {SERVICE_SETTLE_ENV: "0"}):
             self.assertEqual(service_settle_sec(), 0)
 
     def test_configured_service_settle_defaults_for_invalid_values(self) -> None:
         for value in ("not-a-number", "-1", "inf", "nan"):
-            with self.subTest(value=value):
-                with patch.dict("os.environ", {SERVICE_SETTLE_ENV: value}):
-                    self.assertEqual(service_settle_sec(), DEFAULT_SERVICE_SETTLE_SEC)
+            with self.subTest(value=value), patch.dict(OS_ENVIRON, {SERVICE_SETTLE_ENV: value}):
+                self.assertEqual(service_settle_sec(), DEFAULT_SERVICE_SETTLE_SEC)
 
     def test_wait_for_service_settle_skips_systemctl_when_disabled(self) -> None:
         with patch(f"{LOOPBACK_INJECT}.subprocess.run") as run:
@@ -1206,7 +1209,7 @@ class LoopbackInjectTest(unittest.TestCase):
         keyboard = Mock()
 
         with (
-            patch("pathlib.Path.exists", return_value=True),
+            patch(f"{PATHLIB_PATH}.exists", return_value=True),
             patch(f"{LOOPBACK_INJECT}.wait_for_service_settle"),
             patch(f"{LOOPBACK_INJECT}.UInput", side_effect=[keyboard, OSError("mouse failed")]),
         ):
@@ -1221,7 +1224,7 @@ class LoopbackInjectTest(unittest.TestCase):
         keyboard = Mock()
 
         with (
-            patch("pathlib.Path.exists", return_value=True),
+            patch(f"{PATHLIB_PATH}.exists", return_value=True),
             patch(f"{LOOPBACK_INJECT}.wait_for_service_settle"),
             patch(f"{LOOPBACK_INJECT}.UInput", return_value=keyboard),
             patch(f"{LOOPBACK_INJECT}.time.sleep"),
@@ -1242,7 +1245,7 @@ class LoopbackInjectTest(unittest.TestCase):
         consumer = Mock()
 
         with (
-            patch("pathlib.Path.exists", return_value=True),
+            patch(f"{PATHLIB_PATH}.exists", return_value=True),
             patch(f"{LOOPBACK_INJECT}.wait_for_service_settle"),
             patch(f"{LOOPBACK_INJECT}.UInput", side_effect=[keyboard, mouse, consumer]),
             patch(f"{LOOPBACK_INJECT}.time.sleep"),
@@ -1267,9 +1270,8 @@ class LoopbackInjectTest(unittest.TestCase):
         stdout = io.StringIO()
         result = SimpleNamespace(exit_code=0, to_dict=lambda: {}, to_text=lambda: "ok")
 
-        with patch(f"{LOOPBACK_INJECT}.run_inject", return_value=result) as run:
-            with redirect_stdout(stdout):
-                exit_code = run_loopback(["inject"])
+        with patch(f"{LOOPBACK_INJECT}.run_inject", return_value=result) as run, redirect_stdout(stdout):
+            exit_code = run_loopback(["inject"])
 
         self.assertEqual(exit_code, 0)
         run.assert_called_once()
@@ -1291,9 +1293,8 @@ class LoopbackInjectTest(unittest.TestCase):
             to_text=lambda: "ignored",
         )
 
-        with patch(f"{LOOPBACK_CAPTURE}.run_capture", return_value=result):
-            with redirect_stdout(stdout):
-                exit_code = run_loopback(["capture", "--devices", USB_PRODUCT_NAME, "--output", "json"])
+        with patch(f"{LOOPBACK_CAPTURE}.run_capture", return_value=result), redirect_stdout(stdout):
+            exit_code = run_loopback(["capture", "--devices", USB_PRODUCT_NAME, "--output", "json"])
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(json.loads(stdout.getvalue())["details"]["keyboard_steps_seen"], 6)
@@ -1319,9 +1320,11 @@ class LoopbackInjectTest(unittest.TestCase):
     def test_capture_cli_maps_device_parse_errors_to_usage_error(self) -> None:
         stdout = io.StringIO()
 
-        with patch(f"{LOOPBACK_CAPTURE}.run_capture", side_effect=ValueError("devices must not be empty")):
-            with redirect_stdout(stdout):
-                exit_code = run_loopback(["capture", "--devices", ",", "--scenario", SCENARIO_KEYBOARD])
+        with (
+            patch(f"{LOOPBACK_CAPTURE}.run_capture", side_effect=ValueError("devices must not be empty")),
+            redirect_stdout(stdout),
+        ):
+            exit_code = run_loopback(["capture", "--devices", ",", "--scenario", SCENARIO_KEYBOARD])
 
         self.assertEqual(exit_code, EXIT_USAGE)
         self.assertIn("devices must not be empty", stdout.getvalue())
@@ -1496,9 +1499,8 @@ class LoopbackInjectTest(unittest.TestCase):
         stdout = io.StringIO()
         fake_inject_module = SimpleNamespace(run_inject=Mock(side_effect=KeyboardInterrupt))
 
-        with patch.dict("sys.modules", {"bluetooth_2_usb.loopback.inject": fake_inject_module}):
-            with redirect_stdout(stdout):
-                exit_code = run_loopback(["inject"])
+        with patch.dict(SYS_MODULES, {LOOPBACK_INJECT: fake_inject_module}), redirect_stdout(stdout):
+            exit_code = run_loopback(["inject"])
 
         self.assertEqual(exit_code, EXIT_INTERRUPTED)
         self.assertIn("Loopback interrupted", stdout.getvalue())
@@ -1570,7 +1572,7 @@ class LoopbackInjectTest(unittest.TestCase):
                 ),
             ),
             patch(
-                "bluetooth_2_usb.loopback.capture_windows.run_raw_input_capture",
+                f"{LOOPBACK_CAPTURE_WINDOWS}.run_raw_input_capture",
                 return_value=LoopbackResult(
                     command="capture",
                     scenario=SCENARIO_COMBO,
@@ -1604,7 +1606,7 @@ class LoopbackInjectTest(unittest.TestCase):
             patch(f"{LOOPBACK_CAPTURE}.sys.platform", "win32"),
             patch(f"{LOOPBACK_CAPTURE}._load_hidapi", return_value=consumer_hid),
             patch(
-                "bluetooth_2_usb.loopback.capture_windows.run_raw_input_capture",
+                f"{LOOPBACK_CAPTURE_WINDOWS}.run_raw_input_capture",
                 return_value=LoopbackResult(
                     command="capture",
                     scenario=SCENARIO_CONSUMER,

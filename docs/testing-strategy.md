@@ -37,3 +37,7 @@ use [persistent-readonly.md](persistent-readonly.md).
 Prefer constants for repeated patch module prefixes, especially in large suites.
 Use grouped `with` statements or `ExitStack` for related patches so setup stays
 flat and the behavior under test remains visible.
+
+Do not add tests solely to prove removed legacy features or aliases stay absent.
+Prefer negative coverage for current behavior, input validation, migration
+boundaries, and explicit compatibility policy.

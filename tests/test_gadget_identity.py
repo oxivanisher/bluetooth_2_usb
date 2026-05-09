@@ -19,6 +19,8 @@ from bluetooth_2_usb.gadgets.identity import (
 )
 from bluetooth_2_usb.ops.hid_udev_rule import install_hid_udev_rule
 
+OPS_HID_UDEV_RULE = "bluetooth_2_usb.ops.hid_udev_rule"
+
 
 class GadgetIdentityTest(unittest.TestCase):
     def test_usb_identity_formatters_match_configfs_and_udev_shapes(self) -> None:
@@ -79,8 +81,8 @@ class GadgetIdentityTest(unittest.TestCase):
             rule_dst = Path(tmpdir) / "rules.d/70-bluetooth_2_usb_hidapi.rules"
 
             with (
-                patch("bluetooth_2_usb.ops.hid_udev_rule.RULE_DST", rule_dst),
-                patch("bluetooth_2_usb.ops.hid_udev_rule.run", return_value=SimpleNamespace(returncode=0)) as run,
+                patch(f"{OPS_HID_UDEV_RULE}.RULE_DST", rule_dst),
+                patch(f"{OPS_HID_UDEV_RULE}.run", return_value=SimpleNamespace(returncode=0)) as run,
             ):
                 install_hid_udev_rule(repo_root)
 

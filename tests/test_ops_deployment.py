@@ -10,6 +10,8 @@ from bluetooth_2_usb.ops.paths import ManagedPaths
 from bluetooth_2_usb.ops.readonly import ReadonlyConfig
 
 BOOT_CONFIG = "bluetooth_2_usb.ops.deployment.boot_config"
+OPS_DEPLOYMENT = "bluetooth_2_usb.ops.deployment"
+PATHLIB_PATH = "pathlib.Path"
 
 
 class OpsDeploymentTest(unittest.TestCase):
@@ -25,9 +27,9 @@ class OpsDeploymentTest(unittest.TestCase):
 
     def test_install_cli_links_exposes_main_command(self) -> None:
         with (
-            patch("pathlib.Path.mkdir", autospec=True),
-            patch("pathlib.Path.unlink", autospec=True) as unlink,
-            patch("pathlib.Path.symlink_to", autospec=True) as symlink_to,
+            patch(f"{PATHLIB_PATH}.mkdir", autospec=True),
+            patch(f"{PATHLIB_PATH}.unlink", autospec=True) as unlink,
+            patch(f"{PATHLIB_PATH}.symlink_to", autospec=True) as symlink_to,
         ):
             install_cli_links()
 
@@ -45,10 +47,7 @@ class OpsDeploymentTest(unittest.TestCase):
             (venv / "bin/pip").touch()
             (venv / "marker").write_text("previous", encoding="utf-8")
 
-            with (
-                patch("bluetooth_2_usb.ops.deployment.recreate_venv") as recreate,
-                patch("bluetooth_2_usb.ops.deployment.run") as run,
-            ):
+            with patch(f"{OPS_DEPLOYMENT}.recreate_venv") as recreate, patch(f"{OPS_DEPLOYMENT}.run") as run:
                 rebuild_venv(venv, root)
 
             recreate.assert_not_called()
@@ -72,8 +71,8 @@ class OpsDeploymentTest(unittest.TestCase):
                 (target / "bin/pip").touch()
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.recreate_venv", side_effect=fake_recreate_venv) as recreate,
-                patch("bluetooth_2_usb.ops.deployment.run"),
+                patch(f"{OPS_DEPLOYMENT}.recreate_venv", side_effect=fake_recreate_venv) as recreate,
+                patch(f"{OPS_DEPLOYMENT}.run"),
             ):
                 rebuild_venv(venv, root)
 
@@ -94,8 +93,8 @@ class OpsDeploymentTest(unittest.TestCase):
                 (target / "bin/pip").touch()
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.recreate_venv", side_effect=fake_recreate_venv) as recreate,
-                patch("bluetooth_2_usb.ops.deployment.run"),
+                patch(f"{OPS_DEPLOYMENT}.recreate_venv", side_effect=fake_recreate_venv) as recreate,
+                patch(f"{OPS_DEPLOYMENT}.run"),
             ):
                 rebuild_venv(venv, root)
 
@@ -114,8 +113,8 @@ class OpsDeploymentTest(unittest.TestCase):
                 (target / "marker").write_text("new", encoding="utf-8")
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.recreate_venv", side_effect=fake_recreate_venv) as recreate,
-                patch("bluetooth_2_usb.ops.deployment.run"),
+                patch(f"{OPS_DEPLOYMENT}.recreate_venv", side_effect=fake_recreate_venv) as recreate,
+                patch(f"{OPS_DEPLOYMENT}.run"),
             ):
                 rebuild_venv(venv, root, recreate=True)
 
@@ -136,8 +135,8 @@ class OpsDeploymentTest(unittest.TestCase):
                     raise OpsError("package install failed")
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.recreate_venv"),
-                patch("bluetooth_2_usb.ops.deployment.run", side_effect=fake_run),
+                patch(f"{OPS_DEPLOYMENT}.recreate_venv"),
+                patch(f"{OPS_DEPLOYMENT}.run", side_effect=fake_run),
                 self.assertRaisesRegex(OpsError, "package install failed"),
             ):
                 rebuild_venv(venv, root)
@@ -157,8 +156,8 @@ class OpsDeploymentTest(unittest.TestCase):
                     raise OpsError("version check failed")
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.recreate_venv"),
-                patch("bluetooth_2_usb.ops.deployment.run", side_effect=fake_run),
+                patch(f"{OPS_DEPLOYMENT}.recreate_venv"),
+                patch(f"{OPS_DEPLOYMENT}.run", side_effect=fake_run),
                 self.assertRaisesRegex(OpsError, "version check failed"),
             ):
                 rebuild_venv(venv, root)
@@ -183,8 +182,8 @@ class OpsDeploymentTest(unittest.TestCase):
                 return Completed()
 
             with ExitStack() as stack:
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.PATHS", paths))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.require_commands"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.PATHS", paths))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.require_commands"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.detect_boot_dir", return_value=root))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.boot_config_path", return_value=root / "config.txt"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.boot_cmdline_path", return_value=root / "cmdline.txt"))
@@ -194,13 +193,13 @@ class OpsDeploymentTest(unittest.TestCase):
                     patch(f"{BOOT_CONFIG}.board_overlay_line", return_value="dtoverlay=dwc2,dr_mode=peripheral")
                 )
                 stack.enter_context(patch(f"{BOOT_CONFIG}.required_boot_modules_csv", return_value="dwc2,libcomposite"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.clear_bluetooth_rfkill_soft_blocks"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.clear_bluetooth_rfkill_soft_blocks"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.normalize_dwc2_overlay"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.normalize_modules_load"))
                 rebuild = stack.enter_context(
-                    patch("bluetooth_2_usb.ops.deployment.rebuild_venv", side_effect=OpsError("venv failed"))
+                    patch(f"{OPS_DEPLOYMENT}.rebuild_venv", side_effect=OpsError("venv failed"))
                 )
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.run", side_effect=fake_run))
 
                 with self.assertRaises(OpsError):
                     install(recreate_venv=True)
@@ -234,8 +233,8 @@ class OpsDeploymentTest(unittest.TestCase):
                 return Completed()
 
             with ExitStack() as stack:
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.PATHS", paths))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.require_commands"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.PATHS", paths))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.require_commands"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.detect_boot_dir", return_value=root))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.boot_config_path", return_value=root / "config.txt"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.boot_cmdline_path", return_value=root / "cmdline.txt"))
@@ -245,25 +244,20 @@ class OpsDeploymentTest(unittest.TestCase):
                     patch(f"{BOOT_CONFIG}.board_overlay_line", return_value="dtoverlay=dwc2,dr_mode=peripheral")
                 )
                 stack.enter_context(patch(f"{BOOT_CONFIG}.required_boot_modules_csv", return_value="dwc2,libcomposite"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.clear_bluetooth_rfkill_soft_blocks"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.clear_bluetooth_rfkill_soft_blocks"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.normalize_dwc2_overlay"))
                 stack.enter_context(patch(f"{BOOT_CONFIG}.normalize_modules_load"))
-                rebuild = stack.enter_context(patch("bluetooth_2_usb.ops.deployment.rebuild_venv", return_value=None))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.install_service_unit"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.install_cli_links"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.activate_service_unit"))
+                rebuild = stack.enter_context(patch(f"{OPS_DEPLOYMENT}.rebuild_venv", return_value=None))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.install_service_unit"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.install_cli_links"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.activate_service_unit"))
                 normalize = stack.enter_context(
-                    patch(
-                        "bluetooth_2_usb.ops.deployment.normalize_service_settings_file", side_effect=record_normalize
-                    )
+                    patch(f"{OPS_DEPLOYMENT}.normalize_service_settings_file", side_effect=record_normalize)
                 )
                 stack.enter_context(
-                    patch(
-                        "bluetooth_2_usb.ops.deployment.canonicalize_service_settings_bools",
-                        side_effect=record_canonicalize,
-                    )
+                    patch(f"{OPS_DEPLOYMENT}.canonicalize_service_settings_bools", side_effect=record_canonicalize)
                 )
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.run", side_effect=fake_run))
 
                 install()
 
@@ -290,11 +284,11 @@ class OpsDeploymentTest(unittest.TestCase):
                 commands.append(command)
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.PATHS", paths),
-                patch("bluetooth_2_usb.ops.deployment.require_commands"),
-                patch("bluetooth_2_usb.ops.deployment.output", side_effect=fake_output),
-                patch("bluetooth_2_usb.ops.deployment.run", side_effect=fake_run),
-                patch("bluetooth_2_usb.ops.deployment.install") as managed_install,
+                patch(f"{OPS_DEPLOYMENT}.PATHS", paths),
+                patch(f"{OPS_DEPLOYMENT}.require_commands"),
+                patch(f"{OPS_DEPLOYMENT}.output", side_effect=fake_output),
+                patch(f"{OPS_DEPLOYMENT}.run", side_effect=fake_run),
+                patch(f"{OPS_DEPLOYMENT}.install") as managed_install,
             ):
                 update(recreate_venv=True)
 
@@ -315,11 +309,11 @@ class OpsDeploymentTest(unittest.TestCase):
                 raise AssertionError(f"unexpected output command: {command}")
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.PATHS", paths),
-                patch("bluetooth_2_usb.ops.deployment.require_commands"),
-                patch("bluetooth_2_usb.ops.deployment.output", side_effect=fake_output),
-                patch("bluetooth_2_usb.ops.deployment.run"),
-                patch("bluetooth_2_usb.ops.deployment.install") as managed_install,
+                patch(f"{OPS_DEPLOYMENT}.PATHS", paths),
+                patch(f"{OPS_DEPLOYMENT}.require_commands"),
+                patch(f"{OPS_DEPLOYMENT}.output", side_effect=fake_output),
+                patch(f"{OPS_DEPLOYMENT}.run"),
+                patch(f"{OPS_DEPLOYMENT}.install") as managed_install,
             ):
                 update()
 
@@ -332,11 +326,11 @@ class OpsDeploymentTest(unittest.TestCase):
             paths = ManagedPaths(install_dir=root)
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.PATHS", paths),
-                patch("bluetooth_2_usb.ops.deployment.require_commands"),
-                patch("bluetooth_2_usb.ops.deployment.output", return_value=" M src/file.py"),
-                patch("bluetooth_2_usb.ops.deployment.run") as run_command,
-                patch("bluetooth_2_usb.ops.deployment.install") as managed_install,
+                patch(f"{OPS_DEPLOYMENT}.PATHS", paths),
+                patch(f"{OPS_DEPLOYMENT}.require_commands"),
+                patch(f"{OPS_DEPLOYMENT}.output", return_value=" M src/file.py"),
+                patch(f"{OPS_DEPLOYMENT}.run") as run_command,
+                patch(f"{OPS_DEPLOYMENT}.install") as managed_install,
                 self.assertRaisesRegex(OpsError, "Refusing to update a dirty managed checkout"),
             ):
                 update()
@@ -358,11 +352,11 @@ class OpsDeploymentTest(unittest.TestCase):
                 raise AssertionError(f"unexpected output command: {command}")
 
             with (
-                patch("bluetooth_2_usb.ops.deployment.PATHS", paths),
-                patch("bluetooth_2_usb.ops.deployment.require_commands"),
-                patch("bluetooth_2_usb.ops.deployment.output", side_effect=fake_output),
-                patch("bluetooth_2_usb.ops.deployment.run", side_effect=OpsError("pull failed")),
-                patch("bluetooth_2_usb.ops.deployment.install") as managed_install,
+                patch(f"{OPS_DEPLOYMENT}.PATHS", paths),
+                patch(f"{OPS_DEPLOYMENT}.require_commands"),
+                patch(f"{OPS_DEPLOYMENT}.output", side_effect=fake_output),
+                patch(f"{OPS_DEPLOYMENT}.run", side_effect=OpsError("pull failed")),
+                patch(f"{OPS_DEPLOYMENT}.install") as managed_install,
                 self.assertRaisesRegex(OpsError, "pull failed"),
             ):
                 update()
@@ -405,14 +399,14 @@ class OpsDeploymentTest(unittest.TestCase):
                 return Completed()
 
             with ExitStack() as stack:
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.PATHS", paths))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.load_readonly_config", return_value=config))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.service_installed", return_value=False))
-                remove_owned_gadgets = stack.enter_context(patch("bluetooth_2_usb.ops.deployment.remove_owned_gadgets"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.remove_bluetooth_persist_dropin"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.remove_bluetooth_bind_mount_unit"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.remove_persist_mount_unit"))
-                stack.enter_context(patch("bluetooth_2_usb.ops.deployment.run", side_effect=fake_run))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.PATHS", paths))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.load_readonly_config", return_value=config))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.service_installed", return_value=False))
+                remove_owned_gadgets = stack.enter_context(patch(f"{OPS_DEPLOYMENT}.remove_owned_gadgets"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.remove_bluetooth_persist_dropin"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.remove_bluetooth_bind_mount_unit"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.remove_persist_mount_unit"))
+                stack.enter_context(patch(f"{OPS_DEPLOYMENT}.run", side_effect=fake_run))
 
                 uninstall()
 

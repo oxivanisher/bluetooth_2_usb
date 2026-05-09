@@ -26,6 +26,9 @@ from bluetooth_2_usb.ops.devices.validate import validate_capture
 DEVICE_CLI = "bluetooth_2_usb.ops.devices.cli"
 DEVICE_COLLECTOR = "bluetooth_2_usb.ops.devices.collector"
 DEVICE_LINUX = "bluetooth_2_usb.ops.devices.linux"
+OPS_ARTIFACTS_OS = "bluetooth_2_usb.ops.artifacts.os"
+OPS_DEVICES = "bluetooth_2_usb.ops.devices"
+SYS = "sys"
 
 
 class _FakeInputDevice:
@@ -208,7 +211,7 @@ def _minimal_capture_records(*, live_mode: str = "summarized", warning: str | No
 
 class DeviceCaptureTest(unittest.TestCase):
     def test_top_level_device_command_delegates_to_device_cli(self) -> None:
-        with patch("bluetooth_2_usb.ops.devices.run", return_value=23) as device_run:
+        with patch(f"{OPS_DEVICES}.run", return_value=23) as device_run:
             exit_code = cli.run(["device", "capture", "--devices", "/dev/input/event1"])
 
         self.assertEqual(exit_code, 23)
@@ -216,7 +219,7 @@ class DeviceCaptureTest(unittest.TestCase):
 
     def test_device_capture_help_does_not_load_usb_hid(self) -> None:
         stdout = io.StringIO()
-        with patch("sys.stdout", stdout), self.assertRaises(SystemExit) as raised:
+        with patch(f"{SYS}.stdout", stdout), self.assertRaises(SystemExit) as raised:
             run_device(["capture", "--help"])
 
         self.assertEqual(raised.exception.code, 0)
@@ -258,7 +261,7 @@ class DeviceCaptureTest(unittest.TestCase):
 
     def test_device_validate_is_not_public_command(self) -> None:
         stderr = io.StringIO()
-        with patch("sys.stderr", stderr), self.assertRaises(SystemExit) as raised:
+        with patch(f"{SYS}.stderr", stderr), self.assertRaises(SystemExit) as raised:
             run_device(["validate", "--help"])
 
         self.assertEqual(raised.exception.code, 2)
@@ -269,7 +272,7 @@ class DeviceCaptureTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             output = Path(tmpdir) / "capture.jsonl"
             _write_jsonl(output, _minimal_capture_records())
-            with patch(f"{DEVICE_CLI}.capture_device", return_value=output), patch("sys.stdout", stdout):
+            with patch(f"{DEVICE_CLI}.capture_device", return_value=output), patch(f"{SYS}.stdout", stdout):
                 exit_code = run_device(["capture", "--devices", "/dev/input/event1", "--output", str(output)])
 
         self.assertEqual(exit_code, 0)
@@ -302,7 +305,10 @@ class DeviceCaptureTest(unittest.TestCase):
     def test_capture_reports_output_open_failure_cleanly(self) -> None:
         stderr = io.StringIO()
 
-        with patch(f"{DEVICE_CLI}.capture_device", side_effect=PermissionError("denied")), patch("sys.stderr", stderr):
+        with (
+            patch(f"{DEVICE_CLI}.capture_device", side_effect=PermissionError("denied")),
+            patch(f"{SYS}.stderr", stderr),
+        ):
             exit_code = run_device(["capture", "--devices", "/dev/input/event1"])
 
         self.assertEqual(exit_code, 3)
@@ -311,7 +317,7 @@ class DeviceCaptureTest(unittest.TestCase):
     def test_capture_reports_interrupted_partial_output_path(self) -> None:
         stderr = io.StringIO()
 
-        with patch(f"{DEVICE_CLI}.capture_device", side_effect=KeyboardInterrupt), patch("sys.stderr", stderr):
+        with patch(f"{DEVICE_CLI}.capture_device", side_effect=KeyboardInterrupt), patch(f"{SYS}.stderr", stderr):
             exit_code = run_device(["capture", "--devices", "/dev/input/event1"])
 
         self.assertEqual(exit_code, 130)
@@ -329,18 +335,22 @@ class DeviceCaptureTest(unittest.TestCase):
     def test_select_input_device_keeps_single_device_ambiguity_error_for_callers_that_need_one(self) -> None:
         devices = [_FakeInputDevice("/dev/input/event1", "Keyboard"), _FakeInputDevice("/dev/input/event2", "Keyboard")]
 
-        with patch(f"{DEVICE_LINUX}.list_input_devices", return_value=devices):
-            with self.assertRaisesRegex(DeviceSelectionError, "Multiple input devices matched"):
-                select_input_device("key")
+        with (
+            patch(f"{DEVICE_LINUX}.list_input_devices", return_value=devices),
+            self.assertRaisesRegex(DeviceSelectionError, "Multiple input devices matched"),
+        ):
+            select_input_device("key")
 
         self.assertTrue(all(device.closed for device in devices))
 
     def test_select_input_device_reports_missing_match(self) -> None:
         devices = [_FakeInputDevice("/dev/input/event1", "Keyboard")]
 
-        with patch(f"{DEVICE_LINUX}.list_input_devices", return_value=devices):
-            with self.assertRaisesRegex(DeviceSelectionError, "No input device matched"):
-                select_input_device("mouse")
+        with (
+            patch(f"{DEVICE_LINUX}.list_input_devices", return_value=devices),
+            self.assertRaisesRegex(DeviceSelectionError, "No input device matched"),
+        ):
+            select_input_device("mouse")
 
         self.assertTrue(devices[0].closed)
 
@@ -443,19 +453,19 @@ class DeviceCaptureTest(unittest.TestCase):
             with (
                 patch(f"{DEVICE_LINUX}.select_input_devices", return_value=[device]),
                 patch(f"{DEVICE_LINUX}.discover_hidraw_nodes", return_value=[]),
+                self.assertRaisesRegex(OSError, "grab failed"),
             ):
-                with self.assertRaisesRegex(OSError, "grab failed"):
-                    asyncio.run(
-                        collector.capture_device(
-                            devices="/dev/input/event1",
-                            duration_sec=1,
-                            output_path=output,
-                            grab=True,
-                            include_hidraw=False,
-                            max_report_bytes=8,
-                            max_sysfs_file_bytes=8,
-                        )
+                asyncio.run(
+                    collector.capture_device(
+                        devices="/dev/input/event1",
+                        duration_sec=1,
+                        output_path=output,
+                        grab=True,
+                        include_hidraw=False,
+                        max_report_bytes=8,
+                        max_sysfs_file_bytes=8,
                     )
+                )
 
             records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
 
@@ -731,7 +741,7 @@ class DeviceCaptureTest(unittest.TestCase):
             previous_cwd = Path.cwd()
             with (
                 patch.dict(os.environ, {"SUDO_UID": "123", "SUDO_GID": "456"}),
-                patch("bluetooth_2_usb.ops.artifacts.os.chown") as chown,
+                patch(f"{OPS_ARTIFACTS_OS}.chown") as chown,
                 patch(f"{DEVICE_COLLECTOR}.timestamp", return_value="20260506_010203"),
                 patch(f"{DEVICE_LINUX}.select_input_devices", return_value=[device]),
                 patch(f"{DEVICE_LINUX}.discover_hidraw_nodes", return_value=[]),
@@ -1121,19 +1131,19 @@ class DeviceCaptureTest(unittest.TestCase):
             with (
                 patch(f"{DEVICE_LINUX}.select_input_devices", return_value=[device]),
                 patch(f"{DEVICE_LINUX}.discover_hidraw_nodes", return_value=[]),
+                self.assertRaises(asyncio.CancelledError),
             ):
-                with self.assertRaises(asyncio.CancelledError):
-                    asyncio.run(
-                        collector.capture_device(
-                            devices="/dev/input/event1",
-                            duration_sec=30,
-                            output_path=output,
-                            grab=False,
-                            include_hidraw=False,
-                            max_report_bytes=8,
-                            max_sysfs_file_bytes=8,
-                        )
+                asyncio.run(
+                    collector.capture_device(
+                        devices="/dev/input/event1",
+                        duration_sec=30,
+                        output_path=output,
+                        grab=False,
+                        include_hidraw=False,
+                        max_report_bytes=8,
+                        max_sysfs_file_bytes=8,
                     )
+                )
 
             records = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
 

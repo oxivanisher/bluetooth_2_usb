@@ -16,14 +16,18 @@ class UdcDiscoveryTest(unittest.TestCase):
             self.assertEqual(resolve_single_udc_name(udc_root), "fe980000.usb")
 
     def test_resolve_single_udc_name_fails_when_no_controller_exists(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with self.assertRaisesRegex(FileNotFoundError, "No UDC controller was found"):
-                resolve_single_udc_name(Path(tmpdir))
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            self.assertRaisesRegex(FileNotFoundError, "No UDC controller was found"),
+        ):
+            resolve_single_udc_name(Path(tmpdir))
 
     def test_resolve_single_udc_name_fails_when_root_is_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with self.assertRaisesRegex(FileNotFoundError, "No UDC controller was found"):
-                resolve_single_udc_name(Path(tmpdir) / "missing")
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            self.assertRaisesRegex(FileNotFoundError, "No UDC controller was found"),
+        ):
+            resolve_single_udc_name(Path(tmpdir) / "missing")
 
     def test_resolve_single_udc_name_fails_when_multiple_controllers_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -35,10 +39,12 @@ class UdcDiscoveryTest(unittest.TestCase):
                 resolve_single_udc_name(udc_root)
 
     def test_resolve_single_udc_name_preserves_permission_errors(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.object(Path, "iterdir", side_effect=PermissionError(errno.EACCES, "permission denied")):
-                with self.assertRaises(PermissionError):
-                    resolve_single_udc_name(Path(tmpdir))
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(Path, "iterdir", side_effect=PermissionError(errno.EACCES, "permission denied")),
+            self.assertRaises(PermissionError),
+        ):
+            resolve_single_udc_name(Path(tmpdir))
 
     def test_resolve_single_udc_state_path_requires_state_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

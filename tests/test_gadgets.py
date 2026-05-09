@@ -52,6 +52,11 @@ from bluetooth_2_usb.hid.constants import (
 )
 from bluetooth_2_usb.hid.descriptors import DEFAULT_KEYBOARD_DESCRIPTOR, DEFAULT_MOUSE_DESCRIPTOR
 
+GADGETS_CONFIG = "bluetooth_2_usb.gadgets.config"
+GADGETS_MANAGER = "bluetooth_2_usb.gadgets.manager"
+GADGETS_MANAGER_ASYNCIO = "bluetooth_2_usb.gadgets.manager.asyncio"
+GADGETS_MANAGER_OS = "bluetooth_2_usb.gadgets.manager.os"
+
 
 def _hid_function_path(function_index: int) -> str:
     return f"functions/hid.usb{function_index}"
@@ -122,12 +127,12 @@ class _FakeHidGadgets:
 class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
     async def _enable_with_fakes(self, hid_gadgets: HidGadgets, keyboard, mouse, consumer) -> None:
         with (
-            patch("bluetooth_2_usb.gadgets.manager.rebuild_gadget", return_value=[]),
+            patch(f"{GADGETS_MANAGER}.rebuild_gadget", return_value=[]),
             patch.object(hid_gadgets, "prune_stale_hidg_nodes"),
             patch.object(hid_gadgets, "validate_hidg_nodes"),
-            patch("bluetooth_2_usb.gadgets.manager.ExtendedKeyboard", return_value=keyboard),
-            patch("bluetooth_2_usb.gadgets.manager.ExtendedMouse", return_value=mouse),
-            patch("bluetooth_2_usb.gadgets.manager.ExtendedConsumerControl", return_value=consumer),
+            patch(f"{GADGETS_MANAGER}.ExtendedKeyboard", return_value=keyboard),
+            patch(f"{GADGETS_MANAGER}.ExtendedMouse", return_value=mouse),
+            patch(f"{GADGETS_MANAGER}.ExtendedConsumerControl", return_value=consumer),
         ):
             await hid_gadgets.enable()
 
@@ -135,13 +140,13 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
         layout = SimpleNamespace(devices=("keyboard", "mouse", "consumer"))
 
         with (
-            patch("bluetooth_2_usb.gadgets.manager.build_default_layout", return_value=layout),
-            patch("bluetooth_2_usb.gadgets.manager.rebuild_gadget", return_value=[]) as rebuild,
+            patch(f"{GADGETS_MANAGER}.build_default_layout", return_value=layout),
+            patch(f"{GADGETS_MANAGER}.rebuild_gadget", return_value=[]) as rebuild,
             patch.object(HidGadgets, "prune_stale_hidg_nodes"),
             patch.object(HidGadgets, "validate_hidg_nodes"),
-            patch("bluetooth_2_usb.gadgets.manager.ExtendedKeyboard"),
-            patch("bluetooth_2_usb.gadgets.manager.ExtendedMouse"),
-            patch("bluetooth_2_usb.gadgets.manager.ExtendedConsumerControl"),
+            patch(f"{GADGETS_MANAGER}.ExtendedKeyboard"),
+            patch(f"{GADGETS_MANAGER}.ExtendedMouse"),
+            patch(f"{GADGETS_MANAGER}.ExtendedConsumerControl"),
         ):
             await HidGadgets().enable()
 
@@ -178,10 +183,12 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
         hid_gadgets = HidGadgets()
         await self._enable_with_fakes(hid_gadgets, _FakeKeyboard(), _FakeMouse(), _FakeConsumer())
 
-        with patch.object(hid_gadgets, "prune_stale_hidg_nodes"):
-            with patch("bluetooth_2_usb.gadgets.manager.rebuild_gadget", side_effect=RuntimeError("rebuild failed")):
-                with self.assertRaisesRegex(RuntimeError, "rebuild failed"):
-                    await hid_gadgets.enable()
+        with (
+            patch.object(hid_gadgets, "prune_stale_hidg_nodes"),
+            patch(f"{GADGETS_MANAGER}.rebuild_gadget", side_effect=RuntimeError("rebuild failed")),
+            self.assertRaisesRegex(RuntimeError, "rebuild failed"),
+        ):
+            await hid_gadgets.enable()
 
         self.assertIsNone(hid_gadgets.keyboard)
         self.assertIsNone(hid_gadgets.mouse)
@@ -189,9 +196,7 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_declared_hidg_paths_use_declared_function_indexes(self) -> None:
         devices = (SimpleNamespace(function_index=2), SimpleNamespace(function_index=7))
-        with patch(
-            "bluetooth_2_usb.gadgets.manager.build_default_layout", return_value=SimpleNamespace(devices=devices)
-        ):
+        with patch(f"{GADGETS_MANAGER}.build_default_layout", return_value=SimpleNamespace(devices=devices)):
             paths = HidGadgets().declared_hidg_paths()
 
         self.assertEqual(paths, (Path("/dev/hidg2"), Path("/dev/hidg7")))
@@ -203,8 +208,8 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch.object(Path, "stat", return_value=stats) as path_stat,
-            patch("bluetooth_2_usb.gadgets.manager.os.open", return_value=7) as open_path,
-            patch("bluetooth_2_usb.gadgets.manager.os.close"),
+            patch(f"{GADGETS_MANAGER_OS}.open", return_value=7) as open_path,
+            patch(f"{GADGETS_MANAGER_OS}.close"),
         ):
             await hid_gadgets.validate_hidg_nodes([device], timeout_sec=0, poll_interval_sec=0)
 
@@ -277,9 +282,11 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp:
             stale = Path(tmp) / "hidg1"
             stale.write_text("stale", encoding="utf-8")
-            with patch.object(hid_gadgets, "declared_hidg_paths", return_value=(stale,)):
-                with patch.object(Path, "unlink", side_effect=FileNotFoundError):
-                    hid_gadgets.prune_stale_hidg_nodes()
+            with (
+                patch.object(hid_gadgets, "declared_hidg_paths", return_value=(stale,)),
+                patch.object(Path, "unlink", side_effect=FileNotFoundError),
+            ):
+                hid_gadgets.prune_stale_hidg_nodes()
 
     async def test_validate_hidg_nodes_rejects_regular_files(self) -> None:
         hid_gadgets = HidGadgets()
@@ -293,11 +300,13 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
     async def test_validate_hidg_nodes_waits_for_delayed_nodes(self) -> None:
         hid_gadgets = HidGadgets()
 
-        with patch.object(
-            hid_gadgets, "collect_invalid_hidg_nodes", side_effect=[["/dev/hidg0 (missing)"], []]
-        ) as collect_invalid:
-            with patch("bluetooth_2_usb.gadgets.manager.asyncio.sleep") as sleep:
-                await hid_gadgets.validate_hidg_nodes([object()], timeout_sec=0.1, poll_interval_sec=0.01)
+        with (
+            patch.object(
+                hid_gadgets, "collect_invalid_hidg_nodes", side_effect=[["/dev/hidg0 (missing)"], []]
+            ) as collect_invalid,
+            patch(f"{GADGETS_MANAGER_ASYNCIO}.sleep") as sleep,
+        ):
+            await hid_gadgets.validate_hidg_nodes([object()], timeout_sec=0.1, poll_interval_sec=0.01)
 
         self.assertEqual(collect_invalid.call_count, 2)
         sleep.assert_called_once_with(0.01)
@@ -310,8 +319,8 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
         device = SimpleNamespace(name="mouse", path=str(path))
         with (
             patch.object(Path, "stat", return_value=stats),
-            patch("bluetooth_2_usb.gadgets.manager.os.O_NONBLOCK", 0, create=True),
-            patch("bluetooth_2_usb.gadgets.manager.os.open", side_effect=OSError(errno.ENODEV, "No such device")),
+            patch(f"{GADGETS_MANAGER_OS}.O_NONBLOCK", 0, create=True),
+            patch(f"{GADGETS_MANAGER_OS}.open", side_effect=OSError(errno.ENODEV, "No such device")),
         ):
             invalid_paths = hid_gadgets.collect_invalid_hidg_nodes([device])
 
@@ -322,8 +331,8 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             gadget_root = Path(tmpdir) / "usb_gadget" / "adafruit-blinka"
             with (
-                patch("bluetooth_2_usb.gadgets.config.USB_GADGET_ROOT", gadget_root),
-                patch("bluetooth_2_usb.gadgets.config.resolve_single_udc_name", return_value="dummy.udc"),
+                patch(f"{GADGETS_CONFIG}.USB_GADGET_ROOT", gadget_root),
+                patch(f"{GADGETS_CONFIG}.resolve_single_udc_name", return_value="dummy.udc"),
                 patch.object(usb_hid, "gadget_root", str(gadget_root)),
             ):
                 rebuild_gadget(layout)
@@ -394,8 +403,8 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
             original_exists = type(keyboard_wakeup).exists
 
             with (
-                patch("bluetooth_2_usb.gadgets.config.USB_GADGET_ROOT", gadget_root),
-                patch("bluetooth_2_usb.gadgets.config.resolve_single_udc_name", return_value="dummy.udc"),
+                patch(f"{GADGETS_CONFIG}.USB_GADGET_ROOT", gadget_root),
+                patch(f"{GADGETS_CONFIG}.resolve_single_udc_name", return_value="dummy.udc"),
                 patch.object(usb_hid, "gadget_root", str(gadget_root)),
                 patch.object(type(keyboard_wakeup), "exists", fake_exists),
             ):
@@ -410,9 +419,11 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
             path = Path(tmpdir) / "kernel-node"
             path.write_text("1\n", encoding="utf-8")
 
-            with patch.object(Path, "unlink", side_effect=OSError(errno.ENOTEMPTY, "Directory not empty")):
-                with self.assertRaises(OSError) as context:
-                    _safe_unlink(path)
+            with (
+                patch.object(Path, "unlink", side_effect=OSError(errno.ENOTEMPTY, "Directory not empty")),
+                self.assertRaises(OSError) as context,
+            ):
+                _safe_unlink(path)
 
             self.assertEqual(context.exception.errno, errno.ENOTEMPTY)
 
@@ -431,7 +442,7 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
                     root / function_path
                 )
 
-            with patch("bluetooth_2_usb.gadgets.config.USB_GADGET_ROOT", gadget_root):
+            with patch(f"{GADGETS_CONFIG}.USB_GADGET_ROOT", gadget_root):
                 remove_owned_gadgets()
 
             self.assertFalse(gadget_root.exists())
@@ -453,10 +464,7 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
                     raise OSError(errno.EPERM, "Operation not permitted", str(path))
                 return original_unlink(path, *args, **kwargs)
 
-            with (
-                patch("bluetooth_2_usb.gadgets.config.USB_GADGET_ROOT", gadget_root),
-                patch.object(Path, "unlink", fake_unlink),
-            ):
+            with patch(f"{GADGETS_CONFIG}.USB_GADGET_ROOT", gadget_root), patch.object(Path, "unlink", fake_unlink):
                 remove_owned_gadgets()
 
             self.assertTrue(webusb_use.exists())

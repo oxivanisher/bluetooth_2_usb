@@ -9,6 +9,10 @@ from unittest.mock import patch
 from bluetooth_2_usb.runtime.event_source import RuntimeEventSource
 from bluetooth_2_usb.runtime.events import DeviceAdded, DeviceRemoved, UdcState, UdcStateChanged
 
+RUNTIME_EVENT_SOURCE = "bluetooth_2_usb.runtime.event_source"
+RUNTIME_EVENT_SOURCE_PYUDEV = "bluetooth_2_usb.runtime.event_source.pyudev"
+RUNTIME_EVENT_SOURCE_PYUDEV_MONITOR = "bluetooth_2_usb.runtime.event_source.pyudev.Monitor"
+
 
 class _FakeMonitor:
     def __init__(self, events=None) -> None:
@@ -47,8 +51,8 @@ class RuntimeEventSourceTest(unittest.IsolatedAsyncioTestCase):
         poll_interval: float = 0.01,
     ) -> RuntimeEventSource:
         with (
-            patch("bluetooth_2_usb.runtime.event_source.pyudev.Context", return_value=object()),
-            patch("bluetooth_2_usb.runtime.event_source.pyudev.Monitor.from_netlink", return_value=monitor),
+            patch(f"{RUNTIME_EVENT_SOURCE_PYUDEV}.Context", return_value=object()),
+            patch(f"{RUNTIME_EVENT_SOURCE_PYUDEV_MONITOR}.from_netlink", return_value=monitor),
         ):
             return RuntimeEventSource(events, udc_path=udc_path, poll_interval=poll_interval)
 
@@ -136,7 +140,7 @@ class RuntimeEventSourceTest(unittest.IsolatedAsyncioTestCase):
             state = Path(tmpdir) / "state"
             state.write_text("configured\n", encoding="utf-8")
 
-            with patch("bluetooth_2_usb.runtime.event_source.resolve_single_udc_state_path", return_value=state):
+            with patch(f"{RUNTIME_EVENT_SOURCE}.resolve_single_udc_state_path", return_value=state):
                 source = self._build_source(queue, monitor=monitor, udc_path=None)
 
             self.assertEqual(source.read_udc_state(), UdcState.CONFIGURED)
@@ -147,12 +151,14 @@ class RuntimeEventSourceTest(unittest.IsolatedAsyncioTestCase):
         queue = asyncio.Queue()
         monitor = _FakeMonitor()
 
-        with patch(
-            "bluetooth_2_usb.runtime.event_source.resolve_single_udc_state_path",
-            side_effect=RuntimeError("Multiple UDC controllers"),
+        with (
+            patch(
+                f"{RUNTIME_EVENT_SOURCE}.resolve_single_udc_state_path",
+                side_effect=RuntimeError("Multiple UDC controllers"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "Multiple UDC controllers"),
         ):
-            with self.assertRaisesRegex(RuntimeError, "Multiple UDC controllers"):
-                self._build_source(queue, monitor=monitor, udc_path=None)
+            self._build_source(queue, monitor=monitor, udc_path=None)
         monitor.close()
 
     async def test_runtime_event_source_stops_when_start_monitoring_fails(self) -> None:
@@ -163,9 +169,9 @@ class RuntimeEventSourceTest(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(source, "_start_monitoring", side_effect=OSError("monitor unavailable")),
             patch.object(source, "_stop_monitoring") as stop_monitoring,
+            self.assertRaisesRegex(OSError, "monitor unavailable"),
         ):
-            with self.assertRaisesRegex(OSError, "monitor unavailable"):
-                await source.run()
+            await source.run()
 
         stop_monitoring.assert_called_once_with()
         monitor.close()

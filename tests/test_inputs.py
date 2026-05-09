@@ -6,6 +6,8 @@ from bluetooth_2_usb.evdev import ecodes
 from bluetooth_2_usb.inputs.filter import DeviceFilter, DeviceFilterType
 from bluetooth_2_usb.inputs.inventory import auto_relay_exclusion_reason, describe_input_devices, inventory_to_text
 
+INPUTS_INVENTORY = "bluetooth_2_usb.inputs.inventory"
+
 
 class DeviceFilterTest(unittest.TestCase):
     def test_blank_filter_is_rejected(self) -> None:
@@ -112,7 +114,7 @@ class InputInventoryTest(unittest.TestCase):
         mouse = _FakeInputDevice(path="/dev/input/event2", name="Mouse", capabilities={ecodes.EV_REL: []})
         broken = _FakeInputDevice(path="/dev/input/event3", name="Broken", capabilities=OSError("permission denied"))
 
-        with patch("bluetooth_2_usb.inputs.inventory.list_input_devices", return_value=[keyboard, mouse, broken]):
+        with patch(f"{INPUTS_INVENTORY}.list_input_devices", return_value=[keyboard, mouse, broken]):
             devices = describe_input_devices()
 
         self.assertEqual(
@@ -126,7 +128,7 @@ class InputInventoryTest(unittest.TestCase):
 
     def test_inventory_text_marks_relay_and_skipped_devices(self) -> None:
         with patch(
-            "bluetooth_2_usb.inputs.inventory.list_input_devices",
+            f"{INPUTS_INVENTORY}.list_input_devices",
             return_value=[
                 _FakeInputDevice(path="/dev/input/event1", name="Keyboard", capabilities={ecodes.EV_KEY: []}),
                 _FakeInputDevice(path="/dev/input/event2", name="vc4 HDMI", capabilities={ecodes.EV_KEY: []}),
