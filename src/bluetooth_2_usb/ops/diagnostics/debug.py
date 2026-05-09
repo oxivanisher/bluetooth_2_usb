@@ -29,6 +29,17 @@ from .redaction import redact
 DEBUG_COMMAND_TIMEOUT_SECONDS = 20
 
 
+def _timeout_output_text(exc: subprocess.TimeoutExpired) -> str:
+    def decode(value: bytes | str | None) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value
+
+    return decode(exc.stdout) + decode(exc.stderr)
+
+
 @contextmanager
 def _status(message: str):
     with Console(file=sys.stdout).status(message, spinner="dots"):
@@ -69,7 +80,7 @@ def debug_report(duration: int | None) -> int:
                     else "\n[command failed]"
                 )
             except subprocess.TimeoutExpired as exc:
-                text = ((exc.stdout or "") + (exc.stderr or "")) if isinstance(exc.stdout, str) else ""
+                text = _timeout_output_text(exc)
                 suffix = f"\n[timed out after {DEBUG_COMMAND_TIMEOUT_SECONDS}s]"
         body.append("```console\n" + redact((text or "<no output>") + suffix, hostname) + "\n```\n")
 

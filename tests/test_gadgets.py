@@ -14,6 +14,7 @@ from bluetooth_2_usb.gadgets.config import (
     USB_CFG_DIR_NAME,
     USB_LANGID_EN_US,
     _resolve_udc_name,
+    _safe_unlink,
     rebuild_gadget,
     remove_owned_gadgets,
 )
@@ -425,6 +426,22 @@ class HidGadgetsLayoutTest(unittest.IsolatedAsyncioTestCase):
 
             with self.assertRaisesRegex(RuntimeError, "Multiple UDC controllers"):
                 _resolve_udc_name(udc_root)
+
+    async def test_resolve_udc_name_preserves_permission_errors(self) -> None:
+        with patch.object(Path, "iterdir", side_effect=PermissionError(errno.EACCES, "permission denied")):
+            with self.assertRaises(PermissionError):
+                _resolve_udc_name(Path("/sys/class/udc"))
+
+    async def test_configfs_unlink_does_not_suppress_not_empty_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "kernel-node"
+            path.write_text("1\n", encoding="utf-8")
+
+            with patch.object(Path, "unlink", side_effect=OSError(errno.ENOTEMPTY, "Directory not empty")):
+                with self.assertRaises(OSError) as context:
+                    _safe_unlink(path)
+
+            self.assertEqual(context.exception.errno, errno.ENOTEMPTY)
 
     async def test_remove_owned_gadgets_removes_default_and_project_gadget_trees(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

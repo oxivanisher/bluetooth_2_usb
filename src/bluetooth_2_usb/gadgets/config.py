@@ -48,12 +48,15 @@ USB_DEV_PROTOCOL_NONE = "0x00"
 USB_DEV_SUBCLASS_NONE = "0x00"
 """USB device subclass 0: no device-level subclass."""
 
-CONFIGFS_TEARDOWN_IGNORED_ERRNOS = {errno.EACCES, errno.EBUSY, errno.ENOTEMPTY, errno.EPERM}
-"""Errors that can occur when configfs exposes kernel-managed attribute nodes."""
+CONFIGFS_UNLINK_IGNORED_ERRNOS = {errno.EACCES, errno.EBUSY, errno.EPERM}
+"""Unlink errors that can occur when configfs exposes kernel-managed attribute nodes."""
+
+CONFIGFS_RMDIR_IGNORED_ERRNOS = {errno.EBUSY, errno.ENOTEMPTY}
+"""Directory removal errors tolerated while tearing down configfs gadget trees."""
 
 
-def _ignore_configfs_teardown_error(exc: OSError) -> None:
-    if exc.errno not in CONFIGFS_TEARDOWN_IGNORED_ERRNOS:
+def _ignore_configfs_teardown_error(exc: OSError, *, ignored_errnos: set[int]) -> None:
+    if exc.errno not in ignored_errnos:
         raise exc
 
 
@@ -63,7 +66,7 @@ def _safe_unlink(path: Path) -> None:
     except FileNotFoundError:
         pass
     except OSError as exc:
-        _ignore_configfs_teardown_error(exc)
+        _ignore_configfs_teardown_error(exc, ignored_errnos=CONFIGFS_UNLINK_IGNORED_ERRNOS)
 
 
 def _safe_rmdir(path: Path) -> None:
@@ -72,7 +75,7 @@ def _safe_rmdir(path: Path) -> None:
     except FileNotFoundError:
         pass
     except OSError as exc:
-        _ignore_configfs_teardown_error(exc)
+        _ignore_configfs_teardown_error(exc, ignored_errnos=CONFIGFS_RMDIR_IGNORED_ERRNOS)
 
 
 def _safe_write_text(path: Path, value: str) -> None:
@@ -137,7 +140,7 @@ def _maybe_write_wakeup_on_write(device_root: Path, enabled: bool) -> None:
 def _resolve_udc_name(udc_root: Path = Path("/sys/class/udc")) -> str:
     try:
         controllers = sorted(entry.name for entry in udc_root.iterdir() if entry.is_dir())
-    except OSError as exc:
+    except FileNotFoundError as exc:
         raise FileNotFoundError(f"No UDC controller was found in {udc_root}") from exc
     if not controllers:
         raise FileNotFoundError(f"No UDC controller was found in {udc_root}")

@@ -603,6 +603,16 @@ class OpsDiagnosticsTest(unittest.TestCase):
             self.assertIn("Command timed out after 20s: uname -a", report)
             self.assertIn("[timed out after 20s]", report)
 
+    def test_debug_report_timeout_output_decodes_partial_bytes(self) -> None:
+        timeout = subprocess.TimeoutExpired(["slow"], 20, output=b"partial stdout\n", stderr=b"partial stderr\n")
+
+        self.assertEqual(diagnostics_debug._timeout_output_text(timeout), "partial stdout\npartial stderr\n")
+
+    def test_debug_report_timeout_output_preserves_partial_strings(self) -> None:
+        timeout = subprocess.TimeoutExpired(["slow"], 20, output="partial stdout\n", stderr="partial stderr\n")
+
+        self.assertEqual(diagnostics_debug._timeout_output_text(timeout), "partial stdout\npartial stderr\n")
+
     def test_debug_report_keeps_writing_when_readonly_config_is_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
