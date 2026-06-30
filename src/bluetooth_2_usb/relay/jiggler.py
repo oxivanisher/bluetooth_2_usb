@@ -24,9 +24,10 @@ class MouseJiggler:
     regardless of the user pause state. Reset whenever any input event is
     successfully relayed to USB.
 
-    Each jiggle moves 2 pixels diagonally (one of 4 diagonal directions), so
-    both axes always change. The cursor performs a random walk over time, but the
-    random distribution keeps it statistically near the starting position.
+    Each jiggle moves 2 pixels in one of 8 directions (cardinal or diagonal),
+    always ensuring at least one axis moves. The cursor performs a random walk
+    over time, but the random distribution keeps it statistically near the
+    starting position.
     """
 
     _HOST_CHECK_INTERVAL = 5.0
@@ -115,17 +116,18 @@ class MouseJiggler:
 
     async def _perform_jiggle(self) -> None:
         """
-        Move the cursor 2 pixels diagonally in a random direction (one of 4 diagonal
-        directions). Both axes always move, ensuring reliable detection by the host.
-        The random walk keeps the cursor near the starting position on average.
+        Move the cursor 2 pixels in a random direction (one of 8 cardinal or diagonal
+        directions), always ensuring at least one axis moves.
         """
         mouse = self._hid_gadgets.mouse
         if mouse is None:
             logger.warning("MouseJiggler: Mouse gadget not available; skipping jiggle")
             return
         try:
-            x = random.choice([-2, 2])
-            y = random.choice([-2, 2])
+            x = random.choice([-2, 0, 2])
+            y = random.choice([-2, 0, 2])
+            if x == 0 and y == 0:
+                x = random.choice([-2, 2])
             await mouse.move(x=x, y=y)
             logger.info("MouseJiggler: Jiggled mouse (x=%+d, y=%+d)", x, y)
         except OSError as exc:
