@@ -261,6 +261,8 @@ class ServiceSettingsTest(unittest.TestCase):
                         "B2U_DEVICES='MX Keys'",
                         "B2U_GRAB=true",
                         "B2U_SHORTCUT=CTRL+SHIFT+F12",
+                        "B2U_MOUSE_JIGGLER=false",
+                        "B2U_JIGGLER_SHORTCUT=",
                         "B2U_DEBUG=false",
                     ]
                 )
@@ -272,7 +274,15 @@ class ServiceSettingsTest(unittest.TestCase):
             env_file = Path(tmpdir) / "bluetooth_2_usb"
             env_file.write_text(
                 "\n".join(
-                    ["B2U_AUTO=true", "B2U_DEVICES=", "B2U_GRAB=true", "B2U_SHORTCUT=CTRL+SHIFT+F12", "B2U_DEBUG=false"]
+                    [
+                        "B2U_AUTO=true",
+                        "B2U_DEVICES=",
+                        "B2U_GRAB=true",
+                        "B2U_SHORTCUT=CTRL+SHIFT+F12",
+                        "B2U_MOUSE_JIGGLER=false",
+                        "B2U_JIGGLER_SHORTCUT=",
+                        "B2U_DEBUG=false",
+                    ]
                 )
                 + "\n",
                 encoding="utf-8",
@@ -328,7 +338,15 @@ class ServiceSettingsTest(unittest.TestCase):
             self.assertEqual(
                 env_file.read_text(encoding="utf-8"),
                 "\n".join(
-                    ["B2U_AUTO=true", "B2U_DEVICES=", "B2U_GRAB=true", "B2U_SHORTCUT=CTRL+SHIFT+F12", "B2U_DEBUG=false"]
+                    [
+                        "B2U_AUTO=true",
+                        "B2U_DEVICES=",
+                        "B2U_GRAB=true",
+                        "B2U_SHORTCUT=CTRL+SHIFT+F12",
+                        "B2U_MOUSE_JIGGLER=false",
+                        "B2U_JIGGLER_SHORTCUT=",
+                        "B2U_DEBUG=false",
+                    ]
                 )
                 + "\n",
             )
