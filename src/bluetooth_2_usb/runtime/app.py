@@ -142,7 +142,7 @@ class Runtime:
                         self._events.put_nowait(ShutdownRequested("runtime"))
                 if jiggler_task is not None and not jiggler_task.done():
                     jiggler_task.cancel()
-                await self._wait_for_shutdown(supervisor_task, event_source_task)
+                await self._wait_for_shutdown(supervisor_task, event_source_task, jiggler_task)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -154,12 +154,15 @@ class Runtime:
                 self._events.put_nowait(ShutdownRequested("runtime cleanup"))
             if jiggler_task is not None and not jiggler_task.done():
                 jiggler_task.cancel()
-            await self._wait_for_shutdown(supervisor_task, event_source_task)
+            await self._wait_for_shutdown(supervisor_task, event_source_task, jiggler_task)
 
     async def _wait_for_shutdown(
-        self, supervisor_task: asyncio.Task[None] | None, event_source_task: asyncio.Task[None] | None
+        self,
+        supervisor_task: asyncio.Task[None] | None,
+        event_source_task: asyncio.Task[None] | None,
+        jiggler_task: asyncio.Task[None] | None = None,
     ) -> None:
-        tasks = [task for task in (supervisor_task, event_source_task) if task]
+        tasks = [task for task in (supervisor_task, event_source_task, jiggler_task) if task]
         if not tasks:
             return
 

@@ -111,7 +111,7 @@ class CustomArgumentParser(argparse.ArgumentParser):
             default=False,
             help=(
                 "Enable mouse jiggler to prevent screen timeout. Moves the mouse cursor "
-                + "by one pixel every ~2 minutes when no input activity has been detected.\n"
+                + "by 2 pixels in a random direction every ~2 minutes when no input activity is detected.\n"
                 + "Default: disabled"
             ),
         )

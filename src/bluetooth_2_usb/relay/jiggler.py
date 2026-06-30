@@ -20,13 +20,16 @@ class MouseJiggler:
     """
     Periodically moves the mouse by a small amount to prevent screen timeout.
 
-    Fires only when the USB host is configured, regardless of the user pause
-    state. Reset whenever any input event is successfully relayed to USB.
+    Fires when the USB host is configured and writes are not suspended,
+    regardless of the user pause state. Reset whenever any input event is
+    successfully relayed to USB.
 
     Each jiggle moves 2 pixels in a random direction (one of 8 cardinal or
     diagonal directions). The cursor performs a random walk over time, but the
     random distribution keeps it statistically near the starting position.
     """
+
+    _HOST_CHECK_INTERVAL = 5.0
 
     def __init__(
         self,
@@ -37,7 +40,7 @@ class MouseJiggler:
     ) -> None:
         """
         :param hid_gadgets: Provides access to the mouse gadget
-        :param relay_gate: Provides host connection state
+        :param relay_gate: Provides host connection and write-suspension state
         :param base_interval: Base seconds between jiggles (default: 120)
         :param jitter: Random ± seconds added to base_interval (default: 15)
         """
@@ -56,6 +59,9 @@ class MouseJiggler:
     def toggle(self) -> bool:
         """Toggle enabled state. Returns the new enabled state."""
         self._enabled = not self._enabled
+        if self._enabled:
+            # Ensure re-enable doesn't fire immediately if the timer already expired
+            self.reset_timer()
         return self._enabled
 
     def reset_timer(self) -> None:
@@ -91,16 +97,21 @@ class MouseJiggler:
             if now < self._next_jiggle_time:
                 continue
 
-            if self._enabled and self._relay_gate.state.host_configured:
+            state = self._relay_gate.state
+            if self._enabled and state.host_configured and not state.write_suspended:
                 await self._perform_jiggle()
+                interval = self._sample_interval()
+                self._next_jiggle_time = now + interval
+                logger.debug("MouseJiggler: Next jiggle in %.1fs", interval)
             elif not self._enabled:
                 logger.debug("MouseJiggler: Skipping jiggle (disabled by user)")
+                interval = self._sample_interval()
+                self._next_jiggle_time = now + interval
             else:
-                logger.debug("MouseJiggler: Skipping jiggle (host not connected)")
-
-            interval = self._sample_interval()
-            self._next_jiggle_time = now + interval
-            logger.debug("MouseJiggler: Next jiggle in %.1fs", interval)
+                # Host disconnected or writes suspended; check again soon so the
+                # first jiggle after reconnect isn't delayed by a full interval.
+                logger.debug("MouseJiggler: Skipping jiggle (host not ready)")
+                self._next_jiggle_time = now + self._HOST_CHECK_INTERVAL
 
     async def _perform_jiggle(self) -> None:
         """
@@ -122,6 +133,10 @@ class MouseJiggler:
                     y = random.choice([-2, 2])
             await mouse.move(x=x, y=y)
             logger.info("MouseJiggler: Jiggled mouse (x=%+d, y=%+d)", x, y)
+        except OSError as exc:
+            # Suspend writes so the relay gate gates all HID output until reconnect.
+            logger.warning("MouseJiggler: Write error (%s); suspending writes", exc)
+            self._relay_gate.suspend_writes()
         except Exception as exc:
             logger.warning("MouseJiggler: Failed to jiggle mouse: %s", exc)
 
@@ -130,8 +145,9 @@ class JigglerToggler:
     """
     Tracks a user-defined shortcut and toggles the mouse jiggler on/off.
 
-    Uses the same key-suppression approach as ShortcutToggler so the shortcut
-    keys are not forwarded to the USB host.
+    Only the key that completes the shortcut (the trigger key) is suppressed on
+    its way up. All other shortcut keys that were pressed first are forwarded
+    normally, so the USB host never sees a stuck modifier.
     """
 
     def __init__(self, shortcut_keys: set[str], mouse_jiggler: MouseJiggler) -> None:
@@ -170,7 +186,10 @@ class JigglerToggler:
 
         if self._shortcut_armed and self._shortcut_keys and self._shortcut_keys.issubset(self._currently_pressed):
             self._shortcut_armed = False
-            self._suppressed_keys.update(self._shortcut_keys)
+            # Only suppress the trigger key (the one that completed the shortcut).
+            # Keys pressed earlier were already forwarded to the host; suppressing
+            # their key_up would leave stuck modifiers on the USB host.
+            self._suppressed_keys.add(key_name)
             enabled = self._mouse_jiggler.toggle()
             logger.info("JigglerToggler: Mouse jiggler is now %s.", "ON" if enabled else "OFF")
             return True
