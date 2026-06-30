@@ -124,7 +124,7 @@ Default managed-service values:
 | `B2U_GRAB` | `true` |
 | `B2U_SHORTCUT` | `CTRL+SHIFT+F12` |
 | `B2U_MOUSE_JIGGLER` | `false` |
-| `B2U_JIGGLER_SHORTCUT` | empty |
+| `B2U_JIGGLER_SHORTCUT` | `CTRL+SHIFT+F11` |
 | `B2U_DEBUG` | `false` |
 
 After editing the runtime settings:
