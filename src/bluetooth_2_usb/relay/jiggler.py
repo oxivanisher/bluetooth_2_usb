@@ -23,8 +23,9 @@ class MouseJiggler:
     Fires only when the USB host is configured, regardless of the user pause
     state. Reset whenever any input event is successfully relayed to USB.
 
-    Each jiggle moves one pixel right then immediately one pixel left so the
-    visible cursor position never drifts over time.
+    Each jiggle moves 2 pixels in a random direction (one of 8 cardinal or
+    diagonal directions). The cursor performs a random walk over time, but the
+    random distribution keeps it statistically near the starting position.
     """
 
     def __init__(
@@ -102,15 +103,25 @@ class MouseJiggler:
             logger.debug("MouseJiggler: Next jiggle in %.1fs", interval)
 
     async def _perform_jiggle(self) -> None:
-        """Move +1 pixel then -1 pixel so the cursor returns to its original position."""
+        """
+        Move the cursor 2 pixels in a random direction (one of 8 cardinal/diagonal
+        directions). The cursor drifts over time, but the random walk keeps it near
+        the starting position on average.
+        """
         mouse = self._hid_gadgets.mouse
         if mouse is None:
             logger.warning("MouseJiggler: Mouse gadget not available; skipping jiggle")
             return
         try:
-            await mouse.move(x=1, y=0)
-            await mouse.move(x=-1, y=0)
-            logger.info("MouseJiggler: Jiggled mouse")
+            x = random.choice([-2, 0, 2])
+            y = random.choice([-2, 0, 2])
+            if x == 0 and y == 0:
+                if random.random() < 0.5:
+                    x = random.choice([-2, 2])
+                else:
+                    y = random.choice([-2, 2])
+            await mouse.move(x=x, y=y)
+            logger.info("MouseJiggler: Jiggled mouse (x=%+d, y=%+d)", x, y)
         except Exception as exc:
             logger.warning("MouseJiggler: Failed to jiggle mouse: %s", exc)
 
