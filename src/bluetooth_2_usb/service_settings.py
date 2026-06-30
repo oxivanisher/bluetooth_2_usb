@@ -34,7 +34,7 @@ class ServiceSettings:
     grab: bool = True
     shortcut: str = "CTRL+SHIFT+F12"
     mouse_jiggler: bool = False
-    jiggler_shortcut: str = ""
+    jiggler_shortcut: str = "CTRL+SHIFT+F11"
     debug: bool = False
 
     def to_dict(self) -> dict[str, object]:
