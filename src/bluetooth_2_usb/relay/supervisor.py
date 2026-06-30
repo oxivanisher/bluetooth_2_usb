@@ -19,6 +19,7 @@ from ..logging import get_logger
 from ..runtime.events import DeviceAdded, DeviceRemoved, RuntimeEvent, ShutdownRequested, UdcState, UdcStateChanged
 from .gate import RelayGate
 from .input import InputRelay
+from .jiggler import JigglerToggler, MouseJiggler
 from .shortcut import ShortcutToggler
 
 logger = get_logger(__name__)
@@ -61,6 +62,8 @@ class RelaySupervisor:
         skip_name_prefixes: list[str] | None = None,
         grab: bool = False,
         shortcut_toggler: ShortcutToggler | None = None,
+        jiggler_toggler: JigglerToggler | None = None,
+        mouse_jiggler: MouseJiggler | None = None,
     ) -> None:
         """
         :param hid_gadgets: Provides the USB HID gadget devices
@@ -71,10 +74,14 @@ class RelaySupervisor:
         :param skip_name_prefixes: A list of device.name prefixes to skip if auto_relay is True
         :param grab: If True, the relay tries to grab exclusive access to each device
         :param shortcut_toggler: ShortcutToggler to allow toggling relaying globally
+        :param jiggler_toggler: JigglerToggler to allow toggling the mouse jiggler via shortcut
+        :param mouse_jiggler: MouseJiggler to reset activity timer on input events
         """
         self._hid_gadgets = hid_gadgets
         self._relay_gate = relay_gate
         self._shortcut_toggler = shortcut_toggler
+        self._jiggler_toggler = jiggler_toggler
+        self._mouse_jiggler = mouse_jiggler
         self._task_group = task_group
 
         self._device_filters = [DeviceFilter(device) for device in (devices or [])]
@@ -335,6 +342,8 @@ class RelaySupervisor:
                 grab=self._grab,
                 relay_gate=self._relay_gate,
                 shortcut_toggler=self._shortcut_toggler,
+                jiggler_toggler=self._jiggler_toggler,
+                mouse_jiggler=self._mouse_jiggler,
             ) as relay:
                 logger.info("Activated %s", relay)
                 await relay.async_relay_events_loop()

@@ -7,6 +7,7 @@ from ..evdev import ecodes, evdev_to_usb_hid, is_consumer_key, is_mouse_button
 from ..evdev.types import InputEvent, KeyEvent, RelEvent, categorize
 from ..logging import get_logger
 from ..relay.gate import RelayGate
+from ..relay.jiggler import JigglerToggler, MouseJiggler
 from ..relay.shortcut import ShortcutToggler
 from .mouse_delta import MouseDelta, MouseDeltaAccumulator
 
@@ -25,11 +26,18 @@ class HidDispatcher:
     """
 
     def __init__(
-        self, hid_gadgets: HidGadgets, relay_gate: RelayGate, shortcut_toggler: ShortcutToggler | None = None
+        self,
+        hid_gadgets: HidGadgets,
+        relay_gate: RelayGate,
+        shortcut_toggler: ShortcutToggler | None = None,
+        jiggler_toggler: JigglerToggler | None = None,
+        mouse_jiggler: MouseJiggler | None = None,
     ) -> None:
         self._hid_gadgets = hid_gadgets
         self._relay_gate = relay_gate
         self._shortcut_toggler = shortcut_toggler
+        self._jiggler_toggler = jiggler_toggler
+        self._mouse_jiggler = mouse_jiggler
         self._mouse_delta = MouseDeltaAccumulator()
         self._hid_write_failures = 0
 
@@ -42,6 +50,10 @@ class HidDispatcher:
 
         if self._shortcut_toggler and isinstance(event, KeyEvent):
             if self._shortcut_toggler.handle_key_event(event):
+                return
+
+        if self._jiggler_toggler and isinstance(event, KeyEvent):
+            if self._jiggler_toggler.handle_key_event(event):
                 return
 
         if not self._relay_gate.active:
@@ -102,6 +114,8 @@ class HidDispatcher:
     ) -> None:
         try:
             await operation(*args)
+            if self._mouse_jiggler:
+                self._mouse_jiggler.reset_timer()
         except BlockingIOError:
             self._hid_write_failures += 1
             logger.debug("%s HID write blocked; dropping %s", description, context)
