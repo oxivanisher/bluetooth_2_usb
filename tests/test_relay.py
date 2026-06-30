@@ -241,14 +241,19 @@ class ShortcutTogglerTest(unittest.TestCase):
         self.assertFalse(toggler.handle_key_event(make_event(29, 1)))
         self.assertFalse(toggler.handle_key_event(make_event(42, 1)))
         self.assertTrue(toggler.handle_key_event(make_event(88, 1)))
-        self.assertFalse(gate.state.user_enabled)
+        self.assertTrue(gate.state.user_enabled)  # toggle fires on last key-up, not key-down
         self.assertTrue(toggler.handle_key_event(make_event(88, 0)))
         self.assertTrue(toggler.handle_key_event(make_event(42, 0)))
         self.assertTrue(toggler.handle_key_event(make_event(29, 0)))
+        self.assertFalse(gate.state.user_enabled)  # toggle fired when last key released
 
         self.assertFalse(toggler.handle_key_event(make_event(29, 1)))
         self.assertFalse(toggler.handle_key_event(make_event(42, 1)))
         self.assertTrue(toggler.handle_key_event(make_event(88, 1)))
+        self.assertFalse(gate.state.user_enabled)  # still waiting for key-ups
+        self.assertTrue(toggler.handle_key_event(make_event(88, 0)))
+        self.assertTrue(toggler.handle_key_event(make_event(42, 0)))
+        self.assertTrue(toggler.handle_key_event(make_event(29, 0)))
         self.assertTrue(gate.state.user_enabled)
 
     def test_toggle_only_changes_user_enabled_state(self) -> None:
@@ -409,7 +414,7 @@ class InputRelayTest(unittest.IsolatedAsyncioTestCase):
         hid_gadgets = _FakeHidGadgets()
         toggler = ShortcutToggler(shortcut_keys={"KEY_F12"}, relay_gate=gate)
         input_device = _FakeGrabInputDevice(
-            [_TestRelEvent(ecodes.REL_X, 5), _TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_down), _TestSynEvent()]
+            [_TestRelEvent(ecodes.REL_X, 5), _TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_down), _TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_up), _TestSynEvent()]
         )
         relay = InputRelay(input_device, hid_gadgets, grab=True, relay_gate=gate, shortcut_toggler=toggler)
 
@@ -428,6 +433,7 @@ class InputRelayTest(unittest.IsolatedAsyncioTestCase):
         dispatcher = HidDispatcher(_FakeHidGadgets(), gate, toggler)
 
         await dispatcher.dispatch(_TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_down))
+        await dispatcher.dispatch(_TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_up))
 
         self.assertTrue(gate.active)
 

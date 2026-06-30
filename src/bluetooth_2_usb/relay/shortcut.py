@@ -29,6 +29,10 @@ class ShortcutToggler:
         """
         Process a key press or release to detect the toggle shortcut.
 
+        The toggle fires when all shortcut keys are released (not on the
+        initial key-down), so the local terminal sees complete press+release
+        cycles for every modifier before the device grab changes state.
+
         :param event: The incoming KeyEvent from evdev
         :type event: KeyEvent
         """
@@ -38,21 +42,21 @@ class ShortcutToggler:
 
         if event.keystate == KeyEvent.key_down:
             self._currently_pressed.add(key_name)
-        elif event.keystate == KeyEvent.key_up:
+            if self._shortcut_armed and self._shortcut_keys and self._shortcut_keys.issubset(self._currently_pressed):
+                self._shortcut_armed = False
+                self._suppressed_keys.update(self._shortcut_keys)
+            return key_name in self._suppressed_keys
+
+        if event.keystate == KeyEvent.key_up:
             self._currently_pressed.discard(key_name)
             if key_name in self._suppressed_keys:
                 self._suppressed_keys.discard(key_name)
                 if not self._suppressed_keys:
                     self._shortcut_armed = True
+                    self.toggle_relaying()
                 return True
             if self._shortcut_keys and key_name in self._shortcut_keys:
                 self._shortcut_armed = True
-
-        if self._shortcut_armed and self._shortcut_keys and self._shortcut_keys.issubset(self._currently_pressed):
-            self._shortcut_armed = False
-            self._suppressed_keys.update(self._shortcut_keys)
-            self.toggle_relaying()
-            return True
 
         return key_name in self._suppressed_keys
 
