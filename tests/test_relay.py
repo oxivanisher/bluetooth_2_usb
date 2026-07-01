@@ -439,6 +439,30 @@ class InputRelayTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(gate.active)
 
+    async def test_shortcut_pause_forwards_final_modifier_release(self) -> None:
+        # Natural usage: hold CTRL+SHIFT, tap F12, release F12 first, then the
+        # modifiers. The last modifier released (CTRL) is also the event whose
+        # processing flips the relay gate inactive. That release must still
+        # reach the host - its press already did - or CTRL is left stuck down.
+        gate = _active_gate()
+        hid_gadgets = _FakeHidGadgets()
+        toggler = ShortcutToggler(shortcut_keys={"KEY_LEFTCTRL", "KEY_LEFTSHIFT", "KEY_F12"}, relay_gate=gate)
+        dispatcher = HidDispatcher(hid_gadgets, gate, toggler)
+
+        async def send(scancode, keystate):
+            await dispatcher.dispatch(_TestKeyEvent(scancode, keystate))
+
+        await send(ecodes.KEY_LEFTCTRL, _TestKeyEvent.key_down)
+        await send(ecodes.KEY_LEFTSHIFT, _TestKeyEvent.key_down)
+        await send(ecodes.KEY_F12, _TestKeyEvent.key_down)
+        await send(ecodes.KEY_F12, _TestKeyEvent.key_up)
+        await send(ecodes.KEY_LEFTSHIFT, _TestKeyEvent.key_up)
+        await send(ecodes.KEY_LEFTCTRL, _TestKeyEvent.key_up)
+
+        self.assertFalse(gate.active)
+        self.assertEqual(len(hid_gadgets.keyboard.presses), 2)  # CTRL, SHIFT (F12 never forwarded)
+        self.assertEqual(len(hid_gadgets.keyboard.releases), 2)  # both CTRL and SHIFT released
+
     async def test_input_device_removal_stops_reader_without_failing_task_group(self) -> None:
         gate = _active_gate()
         seen = []

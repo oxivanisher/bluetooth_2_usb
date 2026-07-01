@@ -48,6 +48,14 @@ class HidDispatcher:
     async def dispatch(self, raw_event: InputEvent) -> None:
         event = categorize(raw_event)
 
+        # A shortcut key event can itself flip relay_gate (pause/resume) as a
+        # side effect of handle_key_event(). Snapshot the state from before
+        # that flip: a non-suppressed modifier release that completes the
+        # shortcut happened while the old state was still in effect, and must
+        # be forwarded (or dropped) accordingly, not based on the state it
+        # just caused.
+        relay_was_active = self._relay_gate.active
+
         if self._shortcut_toggler and isinstance(event, KeyEvent):
             if self._shortcut_toggler.handle_key_event(event):
                 return
@@ -56,7 +64,7 @@ class HidDispatcher:
             if self._jiggler_toggler.handle_key_event(event):
                 return
 
-        if not self._relay_gate.active:
+        if not relay_was_active:
             self.discard_pending()
             return
 
@@ -105,8 +113,10 @@ class HidDispatcher:
         await self._write_hid_report(mouse.move, "Mouse movement", delta, *delta)
 
     async def _process_key_event(self, event: KeyEvent) -> None:
-        if not self._relay_gate.active:
-            return
+        # Callers already gate on the relay-active snapshot taken before this
+        # event ran through the togglers; re-checking the (possibly now
+        # stale) live gate state here would drop the very key-up that a
+        # shortcut's own completion is supposed to still forward.
         await self._write_hid_report(self._dispatch_key_event, "Key event", event, event)
 
     async def _write_hid_report(
