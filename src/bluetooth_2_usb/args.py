@@ -105,6 +105,28 @@ class CustomArgumentParser(argparse.ArgumentParser):
             ),
         )
         self.add_argument(
+            "--mouse-jiggler",
+            "-j",
+            action="store_true",
+            default=False,
+            help=(
+                "Enable mouse jiggler to prevent screen timeout. Moves the mouse cursor "
+                + "by 2 pixels in a random direction every ~2 minutes when no input activity is detected.\n"
+                + "Default: disabled"
+            ),
+        )
+        self.add_argument(
+            "--jiggler-shortcut",
+            type=_parse_shortcut,
+            default=None,
+            help=(
+                "A plus-separated list of key names to press simultaneously in order to "
+                + "toggle the mouse jiggler on/off. Only effective when --mouse-jiggler is enabled.\n"
+                + "Example: CTRL+SHIFT+F11\n"
+                + "Default: None (feature disabled)"
+            ),
+        )
+        self.add_argument(
             "--list", "-l", action="store_true", default=False, help="List all available input devices and exit."
         )
         self.add_argument(
@@ -150,6 +172,8 @@ class Arguments:
     auto: bool
     grab: bool
     shortcut: list[str] | None
+    mouse_jiggler: bool
+    jiggler_shortcut: list[str] | None
     list: bool
     debug: bool
     version: bool
@@ -181,6 +205,8 @@ def parse_args(argv: list[str] | None = None) -> Arguments:
         auto=args.auto,
         grab=args.grab,
         shortcut=args.shortcut,
+        mouse_jiggler=args.mouse_jiggler,
+        jiggler_shortcut=args.jiggler_shortcut,
         list=args.list,
         debug=args.debug,
         version=args.version,

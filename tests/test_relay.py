@@ -240,15 +240,22 @@ class ShortcutTogglerTest(unittest.TestCase):
 
         self.assertFalse(toggler.handle_key_event(make_event(29, 1)))
         self.assertFalse(toggler.handle_key_event(make_event(42, 1)))
-        self.assertTrue(toggler.handle_key_event(make_event(88, 1)))
-        self.assertFalse(gate.state.user_enabled)
-        self.assertTrue(toggler.handle_key_event(make_event(88, 0)))
-        self.assertTrue(toggler.handle_key_event(make_event(42, 0)))
-        self.assertTrue(toggler.handle_key_event(make_event(29, 0)))
+        self.assertTrue(toggler.handle_key_event(make_event(88, 1)))  # trigger key-down is suppressed
+        self.assertTrue(gate.state.user_enabled)  # toggle fires on last key-up, not key-down
+        self.assertTrue(toggler.handle_key_event(make_event(88, 0)))  # trigger key-up is suppressed
+        # CTRL/SHIFT key-ups were already forwarded on press, so their releases
+        # must be forwarded too, instead of leaving them stuck "down" on the host.
+        self.assertFalse(toggler.handle_key_event(make_event(42, 0)))
+        self.assertFalse(toggler.handle_key_event(make_event(29, 0)))
+        self.assertFalse(gate.state.user_enabled)  # toggle fired when last key released
 
         self.assertFalse(toggler.handle_key_event(make_event(29, 1)))
         self.assertFalse(toggler.handle_key_event(make_event(42, 1)))
         self.assertTrue(toggler.handle_key_event(make_event(88, 1)))
+        self.assertFalse(gate.state.user_enabled)  # still waiting for key-ups
+        self.assertTrue(toggler.handle_key_event(make_event(88, 0)))
+        self.assertFalse(toggler.handle_key_event(make_event(42, 0)))
+        self.assertFalse(toggler.handle_key_event(make_event(29, 0)))
         self.assertTrue(gate.state.user_enabled)
 
     def test_toggle_only_changes_user_enabled_state(self) -> None:
@@ -409,7 +416,7 @@ class InputRelayTest(unittest.IsolatedAsyncioTestCase):
         hid_gadgets = _FakeHidGadgets()
         toggler = ShortcutToggler(shortcut_keys={"KEY_F12"}, relay_gate=gate)
         input_device = _FakeGrabInputDevice(
-            [_TestRelEvent(ecodes.REL_X, 5), _TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_down), _TestSynEvent()]
+            [_TestRelEvent(ecodes.REL_X, 5), _TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_down), _TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_up), _TestSynEvent()]
         )
         relay = InputRelay(input_device, hid_gadgets, grab=True, relay_gate=gate, shortcut_toggler=toggler)
 
@@ -428,8 +435,33 @@ class InputRelayTest(unittest.IsolatedAsyncioTestCase):
         dispatcher = HidDispatcher(_FakeHidGadgets(), gate, toggler)
 
         await dispatcher.dispatch(_TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_down))
+        await dispatcher.dispatch(_TestKeyEvent(UNKNOWN_KEY_CODE, _TestKeyEvent.key_up))
 
         self.assertTrue(gate.active)
+
+    async def test_shortcut_pause_forwards_final_modifier_release(self) -> None:
+        # Natural usage: hold CTRL+SHIFT, tap F12, release F12 first, then the
+        # modifiers. The last modifier released (CTRL) is also the event whose
+        # processing flips the relay gate inactive. That release must still
+        # reach the host - its press already did - or CTRL is left stuck down.
+        gate = _active_gate()
+        hid_gadgets = _FakeHidGadgets()
+        toggler = ShortcutToggler(shortcut_keys={"KEY_LEFTCTRL", "KEY_LEFTSHIFT", "KEY_F12"}, relay_gate=gate)
+        dispatcher = HidDispatcher(hid_gadgets, gate, toggler)
+
+        async def send(scancode, keystate):
+            await dispatcher.dispatch(_TestKeyEvent(scancode, keystate))
+
+        await send(ecodes.KEY_LEFTCTRL, _TestKeyEvent.key_down)
+        await send(ecodes.KEY_LEFTSHIFT, _TestKeyEvent.key_down)
+        await send(ecodes.KEY_F12, _TestKeyEvent.key_down)
+        await send(ecodes.KEY_F12, _TestKeyEvent.key_up)
+        await send(ecodes.KEY_LEFTSHIFT, _TestKeyEvent.key_up)
+        await send(ecodes.KEY_LEFTCTRL, _TestKeyEvent.key_up)
+
+        self.assertFalse(gate.active)
+        self.assertEqual(len(hid_gadgets.keyboard.presses), 2)  # CTRL, SHIFT (F12 never forwarded)
+        self.assertEqual(len(hid_gadgets.keyboard.releases), 2)  # both CTRL and SHIFT released
 
     async def test_input_device_removal_stops_reader_without_failing_task_group(self) -> None:
         gate = _active_gate()
@@ -744,6 +776,63 @@ class RelaySupervisorHotplugTest(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(run_task, timeout=1)
 
         self.assertEqual(device.close_calls, 1)
+
+    async def test_device_removed_while_active_releases_host_visible_hid_state(self) -> None:
+        events: asyncio.Queue = asyncio.Queue()
+        hid_gadgets = _FakeHidGadgets()
+        relay_started = asyncio.Event()
+        relay_exited = asyncio.Event()
+        device = _FakeInputHandle(path="/dev/input/event7", name="target keyboard")
+
+        class WaitingInputRelay:
+            def __init__(self, input_device, *_args, **_kwargs) -> None:
+                self.input_device = input_device
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args) -> bool:
+                relay_exited.set()
+                return False
+
+            async def async_relay_events_loop(self) -> None:
+                relay_started.set()
+                await asyncio.Event().wait()
+
+        with (
+            patch(f"{RELAY_SUPERVISOR}.list_input_devices", return_value=[]),
+            patch(f"{RELAY_SUPERVISOR}.InputDevice", return_value=device),
+            patch(f"{RELAY_SUPERVISOR}.InputRelay", WaitingInputRelay),
+        ):
+            async with asyncio.TaskGroup() as task_group:
+                supervisor = _relay_supervisor(hid_gadgets=hid_gadgets, task_group=task_group, devices=["target"])
+                run_task = task_group.create_task(supervisor.run(events))
+                events.put_nowait(DeviceAdded("/dev/input/event7"))
+                await asyncio.wait_for(relay_started.wait(), timeout=1)
+
+                # The BT source vanishes (e.g. it switched to a different host)
+                # mid-press, with no chance to relay the matching key-up.
+                events.put_nowait(DeviceRemoved("/dev/input/event7"))
+                await asyncio.wait_for(relay_exited.wait(), timeout=1)
+                events.put_nowait(ShutdownRequested("test"))
+                await asyncio.wait_for(run_task, timeout=1)
+
+        self.assertEqual(hid_gadgets.release_all_calls, 1)
+        self.assertEqual(hid_gadgets.keyboard.release_all_calls, 1)
+
+    async def test_device_removed_for_unrelated_device_does_not_release_hid_state(self) -> None:
+        events: asyncio.Queue = asyncio.Queue()
+        hid_gadgets = _FakeHidGadgets()
+
+        with patch(f"{RELAY_SUPERVISOR}.list_input_devices", return_value=[]):
+            async with asyncio.TaskGroup() as task_group:
+                supervisor = _relay_supervisor(hid_gadgets=hid_gadgets, task_group=task_group)
+                run_task = task_group.create_task(supervisor.run(events))
+                events.put_nowait(DeviceRemoved("/dev/input/event-not-active"))
+                events.put_nowait(ShutdownRequested("test"))
+                await asyncio.wait_for(run_task, timeout=1)
+
+        self.assertEqual(hid_gadgets.release_all_calls, 0)
 
     async def test_shutdown_request_releases_and_stops_active_relay(self) -> None:
         events: asyncio.Queue = asyncio.Queue()

@@ -123,6 +123,8 @@ Default managed-service values:
 | `B2U_DEVICES` | empty |
 | `B2U_GRAB` | `true` |
 | `B2U_SHORTCUT` | `CTRL+SHIFT+F12` |
+| `B2U_MOUSE_JIGGLER` | `false` |
+| `B2U_JIGGLER_SHORTCUT` | `CTRL+SHIFT+F11` |
 | `B2U_DEBUG` | `false` |
 
 After editing the runtime settings:
@@ -139,6 +141,8 @@ Runtime CLI and environment reference:
 | `--devices DEVICES` | `B2U_DEVICES` | Comma-separated list of devices to relay. Each value may match an input device path, `uniq`, `phys`, Bluetooth MAC address, or case-insensitive substring of the device name. Example: `--devices '/dev/input/event2,a1:b2:c3:d4:e5:f6,0A-1B-2C-3D-4E-5F,logi'`. |
 | `--grab, -g` | `B2U_GRAB` | Grab the input devices, suppressing local events on the Pi while the devices are relayed. |
 | `--shortcut SHORTCUT, -s SHORTCUT` | `B2U_SHORTCUT` | A plus-separated list of key names to press simultaneously in order to toggle relaying. |
+| `--mouse-jiggler, -j` | `B2U_MOUSE_JIGGLER` | Enable mouse jiggler. Moves the cursor 2 pixels in a random direction every ~2 minutes when no input activity is detected, preventing the host screen from timing out. |
+| `--jiggler-shortcut SHORTCUT` | `B2U_JIGGLER_SHORTCUT` | A plus-separated list of key names to press simultaneously in order to toggle the mouse jiggler on/off. Only effective when `--mouse-jiggler` is enabled. Example: `CTRL+SHIFT+F11`. |
 | `--debug, -d` | `B2U_DEBUG` | Enable debug mode and increase log verbosity. |
 | `--list, -l` | n/a | List all available input devices and exit. Use this before setting `B2U_DEVICES` or `--devices` if you want to confirm the paths and names the runtime actually sees. |
 | `--validate-env` | n/a | Validate gadget runtime prerequisites and exit. On a normal non-gadget workstation this is expected to report missing prerequisites quickly. |

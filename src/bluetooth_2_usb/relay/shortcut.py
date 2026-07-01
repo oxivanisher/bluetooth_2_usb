@@ -22,12 +22,22 @@ class ShortcutToggler:
         self._relay_gate = relay_gate
 
         self._currently_pressed: set[str] = set()
-        self._suppressed_keys: set[str] = set()
+        self._pending_release: set[str] = set()
+        self._trigger_key: str | None = None
         self._shortcut_armed = True
 
     def handle_key_event(self, event: KeyEvent) -> bool:
         """
         Process a key press or release to detect the toggle shortcut.
+
+        Only the trigger key (the one whose key-down completes the shortcut)
+        is suppressed. The other shortcut keys were already forwarded to the
+        host when pressed, so their key-ups are forwarded too, instead of
+        being swallowed and leaving a stuck modifier on the host. The toggle
+        itself still waits until every shortcut key has been released (not
+        the initial key-down), so the device grab state only changes once
+        the local terminal has seen a complete press+release cycle for every
+        modifier.
 
         :param event: The incoming KeyEvent from evdev
         :type event: KeyEvent
@@ -38,23 +48,26 @@ class ShortcutToggler:
 
         if event.keystate == KeyEvent.key_down:
             self._currently_pressed.add(key_name)
-        elif event.keystate == KeyEvent.key_up:
+            if self._shortcut_armed and self._shortcut_keys and self._shortcut_keys.issubset(self._currently_pressed):
+                self._shortcut_armed = False
+                self._trigger_key = key_name
+                self._pending_release = set(self._shortcut_keys)
+            return key_name == self._trigger_key
+
+        if event.keystate == KeyEvent.key_up:
             self._currently_pressed.discard(key_name)
-            if key_name in self._suppressed_keys:
-                self._suppressed_keys.discard(key_name)
-                if not self._suppressed_keys:
+            is_trigger = key_name == self._trigger_key
+            if key_name in self._pending_release:
+                self._pending_release.discard(key_name)
+                if not self._pending_release:
                     self._shortcut_armed = True
-                return True
-            if self._shortcut_keys and key_name in self._shortcut_keys:
+                    self._trigger_key = None
+                    self.toggle_relaying()
+            elif self._shortcut_keys and key_name in self._shortcut_keys:
                 self._shortcut_armed = True
+            return is_trigger
 
-        if self._shortcut_armed and self._shortcut_keys and self._shortcut_keys.issubset(self._currently_pressed):
-            self._shortcut_armed = False
-            self._suppressed_keys.update(self._shortcut_keys)
-            self.toggle_relaying()
-            return True
-
-        return key_name in self._suppressed_keys
+        return False
 
     def toggle_relaying(self) -> None:
         """
