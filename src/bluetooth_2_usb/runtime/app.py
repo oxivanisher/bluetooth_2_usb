@@ -9,6 +9,7 @@ from ..gadgets.manager import HidGadgets
 from ..logging import get_logger
 from ..relay.gate import RelayGate
 from ..relay.jiggler import JigglerToggler, MouseJiggler
+from ..relay.led import KeyboardLedBlinker
 from ..relay.shortcut import ShortcutToggler
 from ..relay.supervisor import RelaySupervisor
 from .config import RuntimeConfig
@@ -51,12 +52,20 @@ class Runtime:
         await hid_gadgets.enable()
 
         shortcut_toggler = self._build_shortcut_toggler(relay_gate)
-        mouse_jiggler, jiggler_toggler = self._build_jiggler(hid_gadgets, relay_gate)
+        mouse_jiggler, jiggler_toggler, led_blinker = self._build_jiggler(hid_gadgets, relay_gate)
         self._event_source = RuntimeEventSource(self._events)
 
         handlers = self._install_signal_handlers()
         try:
-            await self._run_tasks(self._event_source, hid_gadgets, relay_gate, shortcut_toggler, jiggler_toggler, mouse_jiggler)
+            await self._run_tasks(
+                self._event_source,
+                hid_gadgets,
+                relay_gate,
+                shortcut_toggler,
+                jiggler_toggler,
+                mouse_jiggler,
+                led_blinker,
+            )
         finally:
             self._restore_signal_handlers(handlers)
 
@@ -67,6 +76,7 @@ class Runtime:
         shortcut_toggler: ShortcutToggler | None,
         jiggler_toggler: JigglerToggler | None,
         mouse_jiggler: MouseJiggler | None,
+        led_blinker: KeyboardLedBlinker | None,
         task_group: asyncio.TaskGroup,
     ) -> RelaySupervisor:
         return RelaySupervisor(
@@ -79,6 +89,7 @@ class Runtime:
             shortcut_toggler=shortcut_toggler,
             jiggler_toggler=jiggler_toggler,
             mouse_jiggler=mouse_jiggler,
+            led_blinker=led_blinker,
         )
 
     def _build_shortcut_toggler(self, relay_gate: RelayGate) -> ShortcutToggler | None:
@@ -91,20 +102,24 @@ class Runtime:
 
     def _build_jiggler(
         self, hid_gadgets: HidGadgets, relay_gate: RelayGate
-    ) -> tuple[MouseJiggler | None, JigglerToggler | None]:
+    ) -> tuple[MouseJiggler | None, JigglerToggler | None, KeyboardLedBlinker | None]:
         if not self._config.mouse_jiggler:
-            return None, None
+            return None, None, None
 
         logger.debug("Configuring mouse jiggler (base_interval=120s, jitter=±15s)")
         mouse_jiggler = MouseJiggler(hid_gadgets=hid_gadgets, relay_gate=relay_gate)
 
         jiggler_toggler: JigglerToggler | None = None
+        led_blinker: KeyboardLedBlinker | None = None
         if self._config.jiggler_shortcut:
             shortcut_keys = set(self._config.jiggler_shortcut)
             logger.debug("Configuring jiggler toggle shortcut: %s", shortcut_keys)
             jiggler_toggler = JigglerToggler(shortcut_keys=shortcut_keys, mouse_jiggler=mouse_jiggler)
+            # Toggling the jiggler has no other visible feedback, so blink a
+            # keyboard LED to confirm the shortcut was recognized.
+            led_blinker = KeyboardLedBlinker()
 
-        return mouse_jiggler, jiggler_toggler
+        return mouse_jiggler, jiggler_toggler, led_blinker
 
     async def _run_tasks(
         self,
@@ -114,6 +129,7 @@ class Runtime:
         shortcut_toggler: ShortcutToggler | None,
         jiggler_toggler: JigglerToggler | None,
         mouse_jiggler: MouseJiggler | None,
+        led_blinker: KeyboardLedBlinker | None = None,
     ) -> None:
         event_source_task: asyncio.Task[None] | None = None
         supervisor_task: asyncio.Task[None] | None = None
@@ -122,7 +138,7 @@ class Runtime:
         try:
             async with asyncio.TaskGroup() as task_group:
                 supervisor = self._build_supervisor(
-                    hid_gadgets, relay_gate, shortcut_toggler, jiggler_toggler, mouse_jiggler, task_group
+                    hid_gadgets, relay_gate, shortcut_toggler, jiggler_toggler, mouse_jiggler, led_blinker, task_group
                 )
                 self._supervisor = supervisor
                 event_source_task = task_group.create_task(event_source.run(), name="runtime event source")

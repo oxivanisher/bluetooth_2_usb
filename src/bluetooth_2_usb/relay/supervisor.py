@@ -20,11 +20,15 @@ from ..runtime.events import DeviceAdded, DeviceRemoved, RuntimeEvent, ShutdownR
 from .gate import RelayGate
 from .input import InputRelay
 from .jiggler import JigglerToggler, MouseJiggler
+from .led import KeyboardLedBlinker
 from .shortcut import ShortcutToggler
 
 logger = get_logger(__name__)
 
 DEVICE_DISCONNECT_ERRNOS = {errno.EBADF, errno.ENODEV, errno.ENOENT}
+
+JIGGLER_ENABLED_LED_PULSES = 3
+JIGGLER_DISABLED_LED_PULSES = 2
 
 
 class _SupervisorState(Enum):
@@ -64,6 +68,7 @@ class RelaySupervisor:
         shortcut_toggler: ShortcutToggler | None = None,
         jiggler_toggler: JigglerToggler | None = None,
         mouse_jiggler: MouseJiggler | None = None,
+        led_blinker: KeyboardLedBlinker | None = None,
     ) -> None:
         """
         :param hid_gadgets: Provides the USB HID gadget devices
@@ -76,13 +81,18 @@ class RelaySupervisor:
         :param shortcut_toggler: ShortcutToggler to allow toggling relaying globally
         :param jiggler_toggler: JigglerToggler to allow toggling the mouse jiggler via shortcut
         :param mouse_jiggler: MouseJiggler to reset activity timer on input events
+        :param led_blinker: KeyboardLedBlinker giving visual feedback when the jiggler is toggled
         """
         self._hid_gadgets = hid_gadgets
         self._relay_gate = relay_gate
         self._shortcut_toggler = shortcut_toggler
         self._jiggler_toggler = jiggler_toggler
         self._mouse_jiggler = mouse_jiggler
+        self._led_blinker = led_blinker
         self._task_group = task_group
+
+        if self._mouse_jiggler is not None and self._led_blinker is not None:
+            self._mouse_jiggler.add_listener(self._handle_jiggler_toggled)
 
         self._device_filters = [DeviceFilter(device) for device in (devices or [])]
         self._auto_relay = auto_relay
@@ -284,6 +294,20 @@ class RelaySupervisor:
                 device.close()
 
             await asyncio.sleep(self.HOTPLUG_ADD_RETRY_DELAY_SEC)
+
+    def _handle_jiggler_toggled(self, enabled: bool) -> None:
+        if self._led_blinker is None or self._state is not _SupervisorState.RUNNING:
+            return
+        devices = [active_relay.device for active_relay in self._active_relays.values()]
+        if not devices:
+            return
+        pulse_count = JIGGLER_ENABLED_LED_PULSES if enabled else JIGGLER_DISABLED_LED_PULSES
+        try:
+            self._task_group.create_task(
+                self._led_blinker.blink(devices, pulse_count=pulse_count), name="jiggler led blink"
+            )
+        except RuntimeError:
+            logger.debug("Ignoring LED blink; TaskGroup is shutting down.")
 
     def _start_open_device(self, device: InputDevice) -> None:
         if self._state is not _SupervisorState.RUNNING:

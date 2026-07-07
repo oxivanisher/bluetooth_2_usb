@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from ..evdev import find_key_name
@@ -52,10 +53,22 @@ class MouseJiggler:
 
         self._enabled = True
         self._next_jiggle_time = time.monotonic() + self._sample_interval()
+        self._listeners: list[Callable[[bool], None]] = []
 
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    def add_listener(self, listener: Callable[[bool], None]) -> None:
+        """Register a callback invoked with the new enabled state whenever toggle() runs."""
+        if listener not in self._listeners:
+            self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[bool], None]) -> None:
+        try:
+            self._listeners.remove(listener)
+        except ValueError:
+            pass
 
     def toggle(self) -> bool:
         """Toggle enabled state. Returns the new enabled state."""
@@ -63,6 +76,8 @@ class MouseJiggler:
         if self._enabled:
             # Ensure re-enable doesn't fire immediately if the timer already expired
             self.reset_timer()
+        for listener in list(self._listeners):
+            listener(self._enabled)
         return self._enabled
 
     def reset_timer(self) -> None:
