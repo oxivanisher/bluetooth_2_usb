@@ -59,8 +59,7 @@ class KeyboardLedBlinker:
         :param pulse_count: Overrides the configured pulse count for this call
         """
         count = self._pulse_count if pulse_count is None else pulse_count
-        for device in devices:
-            await self._blink_device(device, count)
+        await asyncio.gather(*(self._blink_device(device, count) for device in devices))
 
     async def _blink_device(self, device: InputDevice, pulse_count: int) -> None:
         try:

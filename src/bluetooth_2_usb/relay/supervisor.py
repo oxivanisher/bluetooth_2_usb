@@ -179,10 +179,13 @@ class RelaySupervisor:
         if isinstance(event, DeviceAdded):
             self._device_added(event.path)
         elif isinstance(event, DeviceRemoved):
-            if event.path in self._active_relays:
+            if event.path in self._active_relays and len(self._active_relays) == 1:
                 # A source device can vanish mid-press (e.g. a BT keyboard switching
                 # channels) with its key-up never relayed, leaving the host-visible
                 # HID state stuck. Release proactively rather than waiting for it.
+                # Gadget state is shared across all relayed devices, so only do this
+                # when the vanishing device is the only one active - otherwise this
+                # would also release keys legitimately held by another device.
                 await self._hid_gadgets.release_all()
             self._device_removed(event.path)
         elif isinstance(event, UdcStateChanged):

@@ -6,9 +6,9 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ..evdev import find_key_name
 from ..evdev.types import KeyEvent
 from ..logging import get_logger
+from .chord import ChordToggler
 from .gate import RelayGate
 
 if TYPE_CHECKING:
@@ -145,7 +145,11 @@ class MouseJiggler:
                 x = random.choice([-2, 2])
             await mouse.move(x=x, y=y)
             logger.info("MouseJiggler: Jiggled mouse (x=%+d, y=%+d)", x, y)
-        except OSError as exc:
+        except BlockingIOError as exc:
+            # Transient (e.g. gadget report queue momentarily full); already retried
+            # internally by the gadget write path. Drop this jiggle, don't suspend.
+            logger.debug("MouseJiggler: Write blocked; dropping this jiggle (%s)", exc)
+        except BrokenPipeError as exc:
             # Suspend writes so the relay gate gates all HID output until reconnect.
             logger.warning("MouseJiggler: Write error (%s); suspending writes", exc)
             self._relay_gate.suspend_writes()
@@ -167,12 +171,8 @@ class JigglerToggler:
         :param shortcut_keys: Set of evdev-style key names (e.g. {"KEY_LEFTCTRL", "KEY_F11"})
         :param mouse_jiggler: The MouseJiggler instance to toggle
         """
-        self._shortcut_keys = shortcut_keys
         self._mouse_jiggler = mouse_jiggler
-
-        self._currently_pressed: set[str] = set()
-        self._suppressed_keys: set[str] = set()
-        self._shortcut_armed = True
+        self._chord = ChordToggler(shortcut_keys, on_trigger=self._toggle_jiggler)
 
     def handle_key_event(self, event: KeyEvent) -> bool:
         """
@@ -180,30 +180,8 @@ class JigglerToggler:
 
         :return: True if the event was consumed and should not be forwarded
         """
-        key_name = find_key_name(event)
-        if key_name is None:
-            return False
+        return self._chord.handle_key_event(event)
 
-        if event.keystate == KeyEvent.key_down:
-            self._currently_pressed.add(key_name)
-        elif event.keystate == KeyEvent.key_up:
-            self._currently_pressed.discard(key_name)
-            if key_name in self._suppressed_keys:
-                self._suppressed_keys.discard(key_name)
-                if not self._suppressed_keys:
-                    self._shortcut_armed = True
-                return True
-            if self._shortcut_keys and key_name in self._shortcut_keys:
-                self._shortcut_armed = True
-
-        if self._shortcut_armed and self._shortcut_keys and self._shortcut_keys.issubset(self._currently_pressed):
-            self._shortcut_armed = False
-            # Only suppress the trigger key (the one that completed the shortcut).
-            # Keys pressed earlier were already forwarded to the host; suppressing
-            # their key_up would leave stuck modifiers on the USB host.
-            self._suppressed_keys.add(key_name)
-            enabled = self._mouse_jiggler.toggle()
-            logger.info("JigglerToggler: Mouse jiggler is now %s.", "ON" if enabled else "OFF")
-            return True
-
-        return key_name in self._suppressed_keys
+    def _toggle_jiggler(self) -> None:
+        enabled = self._mouse_jiggler.toggle()
+        logger.info("JigglerToggler: Mouse jiggler is now %s.", "ON" if enabled else "OFF")

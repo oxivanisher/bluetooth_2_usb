@@ -866,6 +866,53 @@ class RelaySupervisorHotplugTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(hid_gadgets.release_all_calls, 0)
 
+    async def test_device_removed_while_another_device_still_active_does_not_release_hid_state(self) -> None:
+        # Regression test: gadget state is shared across all relayed devices,
+        # so proactively releasing on disconnect must not fire while another
+        # device is still actively relaying - that would release keys/buttons
+        # that device is legitimately holding down.
+        events: asyncio.Queue = asyncio.Queue()
+        hid_gadgets = _FakeHidGadgets()
+        device_a = _FakeInputHandle(path="/dev/input/event7", name="keyboard-a")
+        device_b = _FakeInputHandle(path="/dev/input/event8", name="keyboard-b")
+        relay_started = {device_a.path: asyncio.Event(), device_b.path: asyncio.Event()}
+
+        class WaitingInputRelay:
+            def __init__(self, input_device, *_args, **_kwargs) -> None:
+                self.input_device = input_device
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args) -> bool:
+                return False
+
+            async def async_relay_events_loop(self) -> None:
+                relay_started[self.input_device.path].set()
+                await asyncio.Event().wait()
+
+        devices_by_path = {device_a.path: device_a, device_b.path: device_b}
+
+        with (
+            patch(f"{RELAY_SUPERVISOR}.list_input_devices", return_value=[]),
+            patch(f"{RELAY_SUPERVISOR}.InputDevice", side_effect=lambda path: devices_by_path[path]),
+            patch(f"{RELAY_SUPERVISOR}.InputRelay", WaitingInputRelay),
+        ):
+            async with asyncio.TaskGroup() as task_group:
+                supervisor = _relay_supervisor(hid_gadgets=hid_gadgets, task_group=task_group, devices=["keyboard"])
+                run_task = task_group.create_task(supervisor.run(events))
+                events.put_nowait(DeviceAdded(device_a.path))
+                events.put_nowait(DeviceAdded(device_b.path))
+                await asyncio.wait_for(relay_started[device_a.path].wait(), timeout=1)
+                await asyncio.wait_for(relay_started[device_b.path].wait(), timeout=1)
+
+                # device_a vanishes while device_b is still actively relaying.
+                events.put_nowait(DeviceRemoved(device_a.path))
+                events.put_nowait(ShutdownRequested("test"))
+                await asyncio.wait_for(run_task, timeout=1)
+
+        self.assertEqual(hid_gadgets.release_all_calls, 0)
+
     async def test_shutdown_request_releases_and_stops_active_relay(self) -> None:
         events: asyncio.Queue = asyncio.Queue()
         gate = _active_gate()
@@ -1135,6 +1182,78 @@ class MouseJigglerListenerTest(unittest.TestCase):
         jiggler.toggle()
 
         self.assertEqual(seen, [])
+
+
+class JigglerTogglerTest(unittest.TestCase):
+    def test_shortcut_toggles_jiggler_on_last_key_up(self) -> None:
+        gate = _active_gate()
+        mouse_jiggler = MouseJiggler(hid_gadgets=_FakeHidGadgets(), relay_gate=gate)
+        toggler = JigglerToggler(
+            shortcut_keys={"KEY_LEFTCTRL", "KEY_LEFTSHIFT", "KEY_F11"}, mouse_jiggler=mouse_jiggler
+        )
+
+        make_event = lambda scancode, keystate: SimpleNamespace(scancode=scancode, keystate=keystate)
+
+        self.assertFalse(toggler.handle_key_event(make_event(29, 1)))  # CTRL down
+        self.assertFalse(toggler.handle_key_event(make_event(42, 1)))  # SHIFT down
+        self.assertTrue(toggler.handle_key_event(make_event(87, 1)))  # F11 down (trigger) is suppressed
+        self.assertTrue(mouse_jiggler.enabled)  # toggle fires on last key-up, not key-down
+        self.assertTrue(toggler.handle_key_event(make_event(87, 0)))  # trigger key-up is suppressed
+        self.assertFalse(toggler.handle_key_event(make_event(42, 0)))  # SHIFT up forwarded
+        self.assertFalse(toggler.handle_key_event(make_event(29, 0)))  # CTRL up forwarded
+        self.assertFalse(mouse_jiggler.enabled)  # toggled off once every key was released
+
+    def test_retapping_a_held_modifier_does_not_double_toggle(self) -> None:
+        # Regression test: JigglerToggler used to re-arm on release of *any*
+        # shortcut key (not just the trigger), so releasing and re-pressing a
+        # modifier while the rest of the chord was still held caused a
+        # spurious second toggle.
+        gate = _active_gate()
+        mouse_jiggler = MouseJiggler(hid_gadgets=_FakeHidGadgets(), relay_gate=gate)
+        toggler = JigglerToggler(
+            shortcut_keys={"KEY_LEFTCTRL", "KEY_LEFTSHIFT", "KEY_F11"}, mouse_jiggler=mouse_jiggler
+        )
+
+        make_event = lambda scancode, keystate: SimpleNamespace(scancode=scancode, keystate=keystate)
+
+        toggler.handle_key_event(make_event(29, 1))  # CTRL down
+        toggler.handle_key_event(make_event(42, 1))  # SHIFT down
+        toggler.handle_key_event(make_event(87, 1))  # F11 down, chord complete
+        self.assertTrue(mouse_jiggler.enabled)  # not toggled yet, waiting for releases
+
+        toggler.handle_key_event(make_event(42, 0))  # SHIFT up
+        toggler.handle_key_event(make_event(42, 1))  # SHIFT down again, chord still held
+        self.assertTrue(mouse_jiggler.enabled)  # must not have toggled from the bounce
+
+        toggler.handle_key_event(make_event(87, 0))  # F11 up
+        toggler.handle_key_event(make_event(42, 0))  # SHIFT up
+        toggler.handle_key_event(make_event(29, 0))  # CTRL up
+
+        self.assertFalse(mouse_jiggler.enabled)  # exactly one toggle for the whole gesture
+
+
+class MouseJigglerPerformJiggleTest(unittest.IsolatedAsyncioTestCase):
+    async def test_blocking_io_error_drops_jiggle_without_suspending_writes(self) -> None:
+        gate = _active_gate()
+        hid_gadgets = _FakeHidGadgets()
+        hid_gadgets.mouse.move = AsyncMock(side_effect=BlockingIOError())
+        jiggler = MouseJiggler(hid_gadgets=hid_gadgets, relay_gate=gate)
+
+        await jiggler._perform_jiggle()
+
+        self.assertFalse(gate.state.write_suspended)
+        self.assertTrue(gate.active)
+
+    async def test_broken_pipe_error_suspends_writes(self) -> None:
+        gate = _active_gate()
+        hid_gadgets = _FakeHidGadgets()
+        hid_gadgets.mouse.move = AsyncMock(side_effect=BrokenPipeError())
+        jiggler = MouseJiggler(hid_gadgets=hid_gadgets, relay_gate=gate)
+
+        await jiggler._perform_jiggle()
+
+        self.assertTrue(gate.state.write_suspended)
+        self.assertFalse(gate.active)
 
 
 class ResolveLedNameTest(unittest.TestCase):
