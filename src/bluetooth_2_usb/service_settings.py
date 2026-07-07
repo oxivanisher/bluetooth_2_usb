@@ -18,9 +18,10 @@ RUNTIME_ENV_KEY_ORDER = (
     "B2U_SHORTCUT",
     "B2U_MOUSE_JIGGLER",
     "B2U_JIGGLER_SHORTCUT",
+    "B2U_JIGGLER_LED",
     "B2U_DEBUG",
 )
-ALLOWED_KEYS = BOOL_KEYS | {"B2U_SHORTCUT", "B2U_DEVICES", "B2U_JIGGLER_SHORTCUT"}
+ALLOWED_KEYS = BOOL_KEYS | {"B2U_SHORTCUT", "B2U_DEVICES", "B2U_JIGGLER_SHORTCUT", "B2U_JIGGLER_LED"}
 
 
 class ServiceSettingsError(ValueError):
@@ -35,6 +36,7 @@ class ServiceSettings:
     shortcut: str = "CTRL+SHIFT+F12"
     mouse_jiggler: bool = False
     jiggler_shortcut: str = "CTRL+SHIFT+F11"
+    jiggler_led: str = "scroll_lock"
     debug: bool = False
 
     def to_dict(self) -> dict[str, object]:
@@ -95,6 +97,8 @@ def _canonical_value_for_key(key: str, settings: ServiceSettings) -> str:
         return _canonical_bool(settings.mouse_jiggler)
     if key == "B2U_JIGGLER_SHORTCUT":
         return _quote_if_needed(settings.jiggler_shortcut)
+    if key == "B2U_JIGGLER_LED":
+        return _quote_if_needed(settings.jiggler_led)
     if key == "B2U_DEBUG":
         return _canonical_bool(settings.debug)
     raise ServiceSettingsError(f"Unexpected runtime settings key: {key!r}")
@@ -129,6 +133,8 @@ def load_service_settings(env_file: Path = DEFAULT_ENV_FILE) -> ServiceSettings:
             settings.mouse_jiggler = _parse_bool(value, key)
         elif key == "B2U_JIGGLER_SHORTCUT":
             settings.jiggler_shortcut = value
+        elif key == "B2U_JIGGLER_LED":
+            settings.jiggler_led = value
         elif key == "B2U_DEBUG":
             settings.debug = _parse_bool(value, key)
         elif key == "B2U_DEVICES":
@@ -278,6 +284,8 @@ def build_runtime_argv(settings: ServiceSettings, *, append_debug: bool = False)
         argv.append("--mouse-jiggler")
     if settings.jiggler_shortcut:
         argv.extend(["--jiggler-shortcut", settings.jiggler_shortcut])
+    if settings.jiggler_led:
+        argv.extend(["--jiggler-led", settings.jiggler_led])
     if settings.debug or append_debug:
         argv.append("--debug")
     return argv

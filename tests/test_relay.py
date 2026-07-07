@@ -10,7 +10,7 @@ from bluetooth_2_usb.hid.dispatch import HidDispatcher
 from bluetooth_2_usb.relay.gate import RelayGate, RelayInactiveReason
 from bluetooth_2_usb.relay.input import InputRelay
 from bluetooth_2_usb.relay.jiggler import JigglerToggler, MouseJiggler
-from bluetooth_2_usb.relay.led import KeyboardLedBlinker
+from bluetooth_2_usb.relay.led import KeyboardLedBlinker, resolve_led_name
 from bluetooth_2_usb.relay.shortcut import ShortcutToggler
 from bluetooth_2_usb.relay.supervisor import RelaySupervisor
 from bluetooth_2_usb.runtime.events import DeviceAdded, DeviceRemoved, ShutdownRequested, UdcState, UdcStateChanged
@@ -1135,6 +1135,17 @@ class MouseJigglerListenerTest(unittest.TestCase):
         jiggler.toggle()
 
         self.assertEqual(seen, [])
+
+
+class ResolveLedNameTest(unittest.TestCase):
+    def test_resolves_known_names(self) -> None:
+        self.assertEqual(resolve_led_name("caps_lock"), ecodes.LED_CAPSL)
+        self.assertEqual(resolve_led_name("num_lock"), ecodes.LED_NUML)
+        self.assertEqual(resolve_led_name("scroll_lock"), ecodes.LED_SCROLLL)
+
+    def test_unknown_name_raises_value_error(self) -> None:
+        with self.assertRaises(ValueError):
+            resolve_led_name("caps-lock")
 
 
 class KeyboardLedBlinkerTest(unittest.IsolatedAsyncioTestCase):

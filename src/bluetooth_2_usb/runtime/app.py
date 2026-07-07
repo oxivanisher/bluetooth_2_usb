@@ -9,7 +9,7 @@ from ..gadgets.manager import HidGadgets
 from ..logging import get_logger
 from ..relay.gate import RelayGate
 from ..relay.jiggler import JigglerToggler, MouseJiggler
-from ..relay.led import KeyboardLedBlinker
+from ..relay.led import KeyboardLedBlinker, resolve_led_name
 from ..relay.shortcut import ShortcutToggler
 from ..relay.supervisor import RelaySupervisor
 from .config import RuntimeConfig
@@ -117,7 +117,7 @@ class Runtime:
             jiggler_toggler = JigglerToggler(shortcut_keys=shortcut_keys, mouse_jiggler=mouse_jiggler)
             # Toggling the jiggler has no other visible feedback, so blink a
             # keyboard LED to confirm the shortcut was recognized.
-            led_blinker = KeyboardLedBlinker()
+            led_blinker = KeyboardLedBlinker(led=resolve_led_name(self._config.jiggler_led))
 
         return mouse_jiggler, jiggler_toggler, led_blinker
 

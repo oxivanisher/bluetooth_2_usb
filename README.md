@@ -125,6 +125,7 @@ Default managed-service values:
 | `B2U_SHORTCUT` | `CTRL+SHIFT+F12` |
 | `B2U_MOUSE_JIGGLER` | `false` |
 | `B2U_JIGGLER_SHORTCUT` | `CTRL+SHIFT+F11` |
+| `B2U_JIGGLER_LED` | `scroll_lock` |
 | `B2U_DEBUG` | `false` |
 
 After editing the runtime settings:
@@ -142,7 +143,8 @@ Runtime CLI and environment reference:
 | `--grab, -g` | `B2U_GRAB` | Grab the input devices, suppressing local events on the Pi while the devices are relayed. |
 | `--shortcut SHORTCUT, -s SHORTCUT` | `B2U_SHORTCUT` | A plus-separated list of key names to press simultaneously in order to toggle relaying. |
 | `--mouse-jiggler, -j` | `B2U_MOUSE_JIGGLER` | Enable mouse jiggler. Moves the cursor 2 pixels in a random direction every ~2 minutes when no input activity is detected, preventing the host screen from timing out. |
-| `--jiggler-shortcut SHORTCUT` | `B2U_JIGGLER_SHORTCUT` | A plus-separated list of key names to press simultaneously in order to toggle the mouse jiggler on/off. Only effective when `--mouse-jiggler` is enabled. Example: `CTRL+SHIFT+F11`. Toggling it blinks the Scroll Lock LED on the relayed keyboard(s) as visual confirmation: 3 blinks when enabling, 2 when disabling. |
+| `--jiggler-shortcut SHORTCUT` | `B2U_JIGGLER_SHORTCUT` | A plus-separated list of key names to press simultaneously in order to toggle the mouse jiggler on/off. Only effective when `--mouse-jiggler` is enabled. Example: `CTRL+SHIFT+F11`. Toggling it blinks a keyboard LED (see `--jiggler-led`) on the relayed keyboard(s) as visual confirmation: 3 blinks when enabling, 2 when disabling. |
+| `--jiggler-led LED` | `B2U_JIGGLER_LED` | Which keyboard LED to blink for jiggler toggle feedback. Only effective when `--jiggler-shortcut` is set. Choices: `caps_lock`, `num_lock`, `scroll_lock`. Default: `scroll_lock`. Pick one your keyboard actually has; not all keyboards implement all three. |
 | `--debug, -d` | `B2U_DEBUG` | Enable debug mode and increase log verbosity. |
 | `--list, -l` | n/a | List all available input devices and exit. Use this before setting `B2U_DEVICES` or `--devices` if you want to confirm the paths and names the runtime actually sees. |
 | `--validate-env` | n/a | Validate gadget runtime prerequisites and exit. On a normal non-gadget workstation this is expected to report missing prerequisites quickly. |

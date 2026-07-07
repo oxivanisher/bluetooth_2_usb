@@ -44,6 +44,16 @@ def _parse_shortcut(raw_value: str) -> list[str]:
     return parsed_keys
 
 
+def _parse_jiggler_led(raw_value: str) -> str:
+    from .relay.led import LED_NAME_ALIASES
+
+    normalized = raw_value.strip().lower()
+    if normalized not in LED_NAME_ALIASES:
+        choices = ", ".join(sorted(LED_NAME_ALIASES))
+        raise argparse.ArgumentTypeError(f"Unknown LED name: {raw_value!r}. Choices: {choices}")
+    return normalized
+
+
 class CustomArgumentParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(
@@ -127,6 +137,17 @@ class CustomArgumentParser(argparse.ArgumentParser):
             ),
         )
         self.add_argument(
+            "--jiggler-led",
+            type=_parse_jiggler_led,
+            default="scroll_lock",
+            help=(
+                "Which keyboard LED to blink for visual feedback when the mouse jiggler is toggled.\n"
+                + "Only effective when --jiggler-shortcut is set.\n"
+                + "Choices: caps_lock, num_lock, scroll_lock\n"
+                + "Default: scroll_lock"
+            ),
+        )
+        self.add_argument(
             "--list", "-l", action="store_true", default=False, help="List all available input devices and exit."
         )
         self.add_argument(
@@ -174,6 +195,7 @@ class Arguments:
     shortcut: list[str] | None
     mouse_jiggler: bool
     jiggler_shortcut: list[str] | None
+    jiggler_led: str
     list: bool
     debug: bool
     version: bool
@@ -207,6 +229,7 @@ def parse_args(argv: list[str] | None = None) -> Arguments:
         shortcut=args.shortcut,
         mouse_jiggler=args.mouse_jiggler,
         jiggler_shortcut=args.jiggler_shortcut,
+        jiggler_led=args.jiggler_led,
         list=args.list,
         debug=args.debug,
         version=args.version,

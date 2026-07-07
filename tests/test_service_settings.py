@@ -208,7 +208,19 @@ class ServiceSettingsTest(unittest.TestCase):
             settings = load_service_settings(env_file)
             argv = build_runtime_argv(settings)
 
-        self.assertEqual(argv, ["--auto", "--grab", "--shortcut", "CTRL+SHIFT+F12", "--jiggler-shortcut", "CTRL+SHIFT+F11"])
+        self.assertEqual(
+            argv,
+            [
+                "--auto",
+                "--grab",
+                "--shortcut",
+                "CTRL+SHIFT+F12",
+                "--jiggler-shortcut",
+                "CTRL+SHIFT+F11",
+                "--jiggler-led",
+                "scroll_lock",
+            ],
+        )
 
     def test_generated_runtime_argv_is_accepted_by_runtime_parser(self) -> None:
         settings = ServiceSettings(
@@ -263,6 +275,7 @@ class ServiceSettingsTest(unittest.TestCase):
                         "B2U_SHORTCUT=CTRL+SHIFT+F12",
                         "B2U_MOUSE_JIGGLER=false",
                         "B2U_JIGGLER_SHORTCUT=CTRL+SHIFT+F11",
+                        "B2U_JIGGLER_LED=scroll_lock",
                         "B2U_DEBUG=false",
                     ]
                 )
@@ -281,6 +294,7 @@ class ServiceSettingsTest(unittest.TestCase):
                         "B2U_SHORTCUT=CTRL+SHIFT+F12",
                         "B2U_MOUSE_JIGGLER=false",
                         "B2U_JIGGLER_SHORTCUT=CTRL+SHIFT+F11",
+                        "B2U_JIGGLER_LED=scroll_lock",
                         "B2U_DEBUG=false",
                     ]
                 )
@@ -345,6 +359,7 @@ class ServiceSettingsTest(unittest.TestCase):
                         "B2U_SHORTCUT=CTRL+SHIFT+F12",
                         "B2U_MOUSE_JIGGLER=false",
                         "B2U_JIGGLER_SHORTCUT=CTRL+SHIFT+F11",
+                        "B2U_JIGGLER_LED=scroll_lock",
                         "B2U_DEBUG=false",
                     ]
                 )

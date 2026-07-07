@@ -9,6 +9,26 @@ from ..logging import get_logger
 
 logger = get_logger(__name__)
 
+LED_NAME_ALIASES: dict[str, int] = {
+    "caps_lock": ecodes.LED_CAPSL,
+    "num_lock": ecodes.LED_NUML,
+    "scroll_lock": ecodes.LED_SCROLLL,
+}
+DEFAULT_LED_NAME = "scroll_lock"
+
+
+def resolve_led_name(name: str) -> int:
+    """
+    Resolve a user-facing LED name (e.g. "caps_lock") to its evdev LED code.
+
+    :raises ValueError: if the name isn't one of the supported choices
+    """
+    try:
+        return LED_NAME_ALIASES[name]
+    except KeyError as exc:
+        choices = ", ".join(sorted(LED_NAME_ALIASES))
+        raise ValueError(f"Unknown LED name: {name!r}. Choices: {choices}") from exc
+
 
 class KeyboardLedBlinker:
     """
