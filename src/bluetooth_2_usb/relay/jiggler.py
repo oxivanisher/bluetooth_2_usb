@@ -144,7 +144,7 @@ class MouseJiggler:
             if x == 0 and y == 0:
                 x = random.choice([-2, 2])
             await mouse.move(x=x, y=y)
-            logger.info("MouseJiggler: Jiggled mouse (x=%+d, y=%+d)", x, y)
+            logger.debug("MouseJiggler: Jiggled mouse (x=%+d, y=%+d)", x, y)
         except BlockingIOError as exc:
             # Transient (e.g. gadget report queue momentarily full); already retried
             # internally by the gadget write path. Drop this jiggle, don't suspend.
