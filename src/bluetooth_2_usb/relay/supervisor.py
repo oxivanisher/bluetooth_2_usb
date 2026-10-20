@@ -27,8 +27,12 @@ logger = get_logger(__name__)
 
 DEVICE_DISCONNECT_ERRNOS = {errno.EBADF, errno.ENODEV, errno.ENOENT}
 
-JIGGLER_ENABLED_LED_PULSES = 3
-JIGGLER_DISABLED_LED_PULSES = 2
+# Slow enough to read through Bluetooth keyboard LED latency, and shaped
+# differently so the state is clear without counting blinks.
+JIGGLER_ENABLED_LED_PULSES = 1  # one long glow
+JIGGLER_ENABLED_LED_PULSE_SEC = 1.5
+JIGGLER_DISABLED_LED_PULSES = 3  # slow blinks
+JIGGLER_DISABLED_LED_PULSE_SEC = 0.5
 
 
 class _SupervisorState(Enum):
@@ -89,6 +93,7 @@ class RelaySupervisor:
         self._jiggler_toggler = jiggler_toggler
         self._mouse_jiggler = mouse_jiggler
         self._led_blinker = led_blinker
+        self._led_blink_task: asyncio.Task[None] | None = None
         self._task_group = task_group
 
         if self._mouse_jiggler is not None and self._led_blinker is not None:
@@ -304,13 +309,28 @@ class RelaySupervisor:
         devices = [active_relay.device for active_relay in self._active_relays.values()]
         if not devices:
             return
-        pulse_count = JIGGLER_ENABLED_LED_PULSES if enabled else JIGGLER_DISABLED_LED_PULSES
+        if enabled:
+            pulse_count, pulse_seconds = JIGGLER_ENABLED_LED_PULSES, JIGGLER_ENABLED_LED_PULSE_SEC
+        else:
+            pulse_count, pulse_seconds = JIGGLER_DISABLED_LED_PULSES, JIGGLER_DISABLED_LED_PULSE_SEC
+        # A still-running blink must finish restoring the LED before the next
+        # one samples its original state, or the LED can end up stuck inverted.
+        previous = self._led_blink_task
+        if previous is not None and not previous.done():
+            previous.cancel()
         try:
-            self._task_group.create_task(
-                self._led_blinker.blink(devices, pulse_count=pulse_count), name="jiggler led blink"
+            self._led_blink_task = self._task_group.create_task(
+                self._blink_led(previous, devices, pulse_count, pulse_seconds), name="jiggler led blink"
             )
         except RuntimeError:
             logger.debug("Ignoring LED blink; TaskGroup is shutting down.")
+
+    async def _blink_led(
+        self, previous: asyncio.Task[None] | None, devices: list[InputDevice], pulse_count: int, pulse_seconds: float
+    ) -> None:
+        if previous is not None:
+            await asyncio.wait({previous})
+        await self._led_blinker.blink(devices, pulse_count=pulse_count, pulse_seconds=pulse_seconds)
 
     def _start_open_device(self, device: InputDevice) -> None:
         if self._state is not _SupervisorState.RUNNING:

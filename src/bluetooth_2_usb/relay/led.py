@@ -48,7 +48,9 @@ class KeyboardLedBlinker:
         self._pulse_seconds = pulse_seconds
         self._pulse_count = pulse_count
 
-    async def blink(self, devices: Iterable[InputDevice], *, pulse_count: int | None = None) -> None:
+    async def blink(
+        self, devices: Iterable[InputDevice], *, pulse_count: int | None = None, pulse_seconds: float | None = None
+    ) -> None:
         """
         Blink the configured LED on every device that supports it, restoring
         each device's original LED state afterwards.
@@ -56,24 +58,50 @@ class KeyboardLedBlinker:
         A device that lacks the LED capability, or that fails mid-blink (e.g.
         because it just disconnected), is skipped without affecting the others.
 
+        If the blink is cancelled midway, each device's LED is still restored.
+
         :param pulse_count: Overrides the configured pulse count for this call
+        :param pulse_seconds: Overrides the configured on/off phase duration for this call
         """
         count = self._pulse_count if pulse_count is None else pulse_count
-        await asyncio.gather(*(self._blink_device(device, count) for device in devices))
+        seconds = self._pulse_seconds if pulse_seconds is None else pulse_seconds
+        await asyncio.gather(*(self._blink_device(device, count, seconds) for device in devices))
 
-    async def _blink_device(self, device: InputDevice, pulse_count: int) -> None:
+    async def _blink_device(self, device: InputDevice, pulse_count: int, pulse_seconds: float) -> None:
         try:
             supported_leds = device.capabilities(verbose=False).get(ecodes.EV_LED, [])
             if self._led not in supported_leds:
                 return
             original = self._led in device.leds()
+        except OSError as exc:
+            logger.debug("Skipping LED blink for %s: %s", device.path, exc)
+            return
+        except Exception:
+            logger.debug("Unexpected error blinking LED for %s.", device.path, exc_info=True)
+            return
+
+        inverted = False
+        try:
             for pulse in range(pulse_count):
+                inverted = True
                 device.set_led(self._led, 0 if original else 1)
-                await asyncio.sleep(self._pulse_seconds)
+                await asyncio.sleep(pulse_seconds)
                 device.set_led(self._led, 1 if original else 0)
+                inverted = False
                 if pulse < pulse_count - 1:
-                    await asyncio.sleep(self._pulse_seconds)
+                    await asyncio.sleep(pulse_seconds)
         except OSError as exc:
             logger.debug("Skipping LED blink for %s: %s", device.path, exc)
         except Exception:
             logger.debug("Unexpected error blinking LED for %s.", device.path, exc_info=True)
+        finally:
+            # Cancellation (e.g. a newer blink superseding this one) can land
+            # while the LED is inverted; put it back so it doesn't stay stuck.
+            if inverted:
+                self._restore_led(device, original)
+
+    def _restore_led(self, device: InputDevice, original: bool) -> None:
+        try:
+            device.set_led(self._led, 1 if original else 0)
+        except Exception as exc:
+            logger.debug("Could not restore LED state for %s: %s", device.path, exc)
