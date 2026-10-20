@@ -157,6 +157,31 @@ Runtime CLI and environment reference:
 > Linux input devices that are visible on the Pi. The intended primary use case
 > remains Bluetooth keyboard and mouse bridging.
 
+## Desktop status indicator
+
+If the Pi also runs a desktop (Raspberry Pi OS with labwc and `wf-panel-pi`),
+a tray icon can show the mouse jiggler state and where input currently goes.
+It is display only.
+
+The service publishes its state to `/run/bluetooth_2_usb/status.json`. The
+indicator reads that file as the desktop user with the system Python:
+
+```bash
+sudo apt install -y python3-gi gir1.2-ayatanaappindicator3-0.1
+mkdir -p ~/.config/autostart
+cp /opt/bluetooth_2_usb/desktop/bluetooth_2_usb-tray.desktop ~/.config/autostart/
+/usr/bin/python3 /opt/bluetooth_2_usb/desktop/bluetooth_2_usb_tray.py &
+```
+
+The mouse is green while the jiggler is on and red with a slash while it is
+off. The badge shows the relay: blue arrow for forwarding to the USB host,
+orange pause for relay paused (input stays on the Pi), hollow grey for no
+usable USB host. A dashed grey outline means the service is not running. The
+menu spells out the same state in text.
+
+The indicator installs its icons into `~/.local/share/icons/hicolor`, because
+`wf-panel-pi` only resolves tray icons by theme name.
+
 ## Read-only operation
 
 For the supported appliance-style read-only workflow, use
@@ -259,6 +284,7 @@ enable/disable, migration, and validation details, use
 | `/mnt/b2u-persist` | Default persistent mount target |
 | `/mnt/b2u-persist/bluetooth` | Default persistent Bluetooth state directory |
 | `/etc/systemd/system/bluetooth_2_usb.service` | Installed service unit |
+| `/run/bluetooth_2_usb/status.json` | Live relay and jiggler state for the desktop indicator |
 
 ## Development and release
 

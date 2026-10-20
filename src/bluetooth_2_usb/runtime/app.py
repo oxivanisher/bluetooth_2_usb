@@ -15,6 +15,7 @@ from ..relay.supervisor import RelaySupervisor
 from .config import RuntimeConfig
 from .event_source import RuntimeEventSource
 from .events import RuntimeEvent, ShutdownRequested
+from .status import StatusPublisher
 
 logger = get_logger(__name__)
 
@@ -54,6 +55,10 @@ class Runtime:
         shortcut_toggler = self._build_shortcut_toggler(relay_gate)
         mouse_jiggler, jiggler_toggler, led_blinker = self._build_jiggler(hid_gadgets, relay_gate)
         self._event_source = RuntimeEventSource(self._events)
+        status_publisher = StatusPublisher.from_environment(relay_gate, mouse_jiggler)
+        if status_publisher is not None:
+            logger.debug("Publishing runtime status to %s", status_publisher.path)
+            status_publisher.start()
 
         handlers = self._install_signal_handlers()
         try:
@@ -68,6 +73,8 @@ class Runtime:
             )
         finally:
             self._restore_signal_handlers(handlers)
+            if status_publisher is not None:
+                status_publisher.stop()
 
     def _build_supervisor(
         self,
