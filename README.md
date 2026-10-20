@@ -164,14 +164,16 @@ a tray icon can show the mouse jiggler state and where input currently goes.
 It is display only.
 
 The service publishes its state to `/run/bluetooth_2_usb/status.json`. The
-indicator reads that file as the desktop user with the system Python:
+indicator reads that file as the desktop user with the system Python. Set it
+up once with:
 
 ```bash
-sudo apt install -y python3-gi gir1.2-ayatanaappindicator3-0.1
-mkdir -p ~/.config/autostart
-cp /opt/bluetooth_2_usb/desktop/bluetooth_2_usb-tray.desktop ~/.config/autostart/
-/usr/bin/python3 /opt/bluetooth_2_usb/desktop/bluetooth_2_usb_tray.py &
+sudo bluetooth_2_usb tray install
 ```
+
+It starts with the next desktop login. To start it right away, run
+`/usr/bin/python3 /opt/bluetooth_2_usb/desktop/bluetooth_2_usb_tray.py &` as
+your desktop user.
 
 The mouse is green while the jiggler is on and red with a slash while it is
 off. The badge shows the relay: blue arrow for forwarding to the USB host,
@@ -265,6 +267,14 @@ the checkout that contains the rule source:
 sudo ./venv/bin/bluetooth_2_usb udev install --repo-root "$PWD"
 ```
 
+### `tray install|uninstall`
+
+Install the desktop tray indicator's packages (`python3-gi`,
+`gir1.2-ayatanaappindicator3-0.1`) and autostart it for desktop users on the
+Pi, or remove that autostart entry. `install` and `update` keep an existing
+entry in sync, and `uninstall` removes it. See
+[Desktop status indicator](#desktop-status-indicator).
+
 ### `readonly setup|status|enable|disable|migrate`
 
 Prepare persistent ext4-backed Bluetooth state, inspect read-only state, switch
@@ -285,6 +295,7 @@ enable/disable, migration, and validation details, use
 | `/mnt/b2u-persist/bluetooth` | Default persistent Bluetooth state directory |
 | `/etc/systemd/system/bluetooth_2_usb.service` | Installed service unit |
 | `/run/bluetooth_2_usb/status.json` | Live relay and jiggler state for the desktop indicator |
+| `/etc/xdg/autostart/bluetooth_2_usb-tray.desktop` | Desktop indicator autostart entry (after `tray install`) |
 
 ## Development and release
 
